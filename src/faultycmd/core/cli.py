@@ -15,6 +15,7 @@ Top-level command groups mirror the firmware's CDC layout:
     faultycmd crowbar   (F5 crowbar_proto on CDC1)
     faultycmd campaign  (F9-4 campaign_proto on CDC0/CDC1, --engine)
     faultycmd scanner   (F8-2 ``scan swd`` over CDC2 text shell)
+    faultycmd uart      (Target UART passthrough: CDC2 control + CDC3 data)
     faultycmd tui       (F10-5 Textual dashboard)
     faultycmd devices   (USB enumeration helper)
 
@@ -179,9 +180,7 @@ def devices() -> None:
         print_warning("No FaultyCat CDC found.")
         print_dim("Check that the board is plugged in and re-enumerated as 1209:fa17.")
         raise SystemExit(1)
-    table = Table(
-        title=f"Found {len(ports)} FaultyCat interface(s)", box=box.ROUNDED
-    )
+    table = Table(title=f"Found {len(ports)} FaultyCat interface(s)", box=box.ROUNDED)
     table.add_column("IF", style=STYLES["device"], justify="right")
     table.add_column("role", style="green")
     table.add_column("device", style="white")
@@ -762,6 +761,202 @@ def scanner_scan_swd(
             timeout_s=timeout_s,
             on_progress=console.print,
         )
+
+
+# -----------------------------------------------------------------------------
+# `uart` (Target UART passthrough)
+#
+# Control verbs (enter/baud/parity/stopbits/status/exit) ride the CDC2
+# text shell via ScannerClient — see uart_passthrough in main.c. The
+# actual byte traffic flows on a separate CDC (the "target" role in
+# core.usb); `uart console` bridges that data CDC to this terminal.
+# -----------------------------------------------------------------------------
+
+
+@main.group()
+@click.option("--port", default=None, help="Override the scanner control port (CDC2).")
+@click.pass_context
+def uart(ctx: click.Context, port: str | None) -> None:
+    """Control and bridge the Target UART passthrough."""
+    ctx.obj = port
+
+
+def _uart_control_client(ctx: click.Context) -> ScannerClient:
+    port = ctx.obj
+    return ScannerClient(port) if port is not None else ScannerClient.discover()
+
+
+@uart.command("enter")
+@click.option("--baud", type=int, default=115200, show_default=True)
+@click.option(
+    "--parity", type=click.Choice(["n", "e", "o"]), default="n", show_default=True
+)
+@click.option(
+    "--stopbits",
+    "stop_bits",
+    type=click.Choice(["1", "2"]),
+    default="1",
+    show_default=True,
+)
+@click.pass_context
+def uart_enter(ctx: click.Context, baud: int, parity: str, stop_bits: str) -> None:
+    """Enable the bridge (CH0=TX/CH1=RX on the scanner header)."""
+    with _uart_control_client(ctx) as cli:
+        reply = cli.uart_enter(baud=baud, parity=parity, stop_bits=int(stop_bits))
+    print_success(reply)
+
+
+@uart.command("exit")
+@click.pass_context
+def uart_exit(ctx: click.Context) -> None:
+    """Disable the bridge."""
+    with _uart_control_client(ctx) as cli:
+        reply = cli.uart_exit()
+    print_success(reply)
+
+
+@uart.command("status")
+@click.pass_context
+def uart_status(ctx: click.Context) -> None:
+    """Show the current bridge configuration."""
+    with _uart_control_client(ctx) as cli:
+        reply = cli.uart_status()
+    print_info(reply)
+
+
+@uart.command("baud")
+@click.argument("value", type=int)
+@click.pass_context
+def uart_baud(ctx: click.Context, value: int) -> None:
+    """Reconfigure the baud rate of a live bridge."""
+    with _uart_control_client(ctx) as cli:
+        reply = cli.uart_set_baud(value)
+    print_success(reply)
+
+
+@uart.command("parity")
+@click.argument("value", type=click.Choice(["n", "e", "o"]))
+@click.pass_context
+def uart_parity(ctx: click.Context, value: str) -> None:
+    """Reconfigure the parity of a live bridge."""
+    with _uart_control_client(ctx) as cli:
+        reply = cli.uart_set_parity(value)
+    print_success(reply)
+
+
+@uart.command("stopbits")
+@click.argument("value", type=click.Choice(["1", "2"]))
+@click.pass_context
+def uart_stopbits(ctx: click.Context, value: str) -> None:
+    """Reconfigure the stop bits of a live bridge."""
+    with _uart_control_client(ctx) as cli:
+        reply = cli.uart_set_stopbits(int(value))
+    print_success(reply)
+
+
+@uart.command("console")
+@click.option(
+    "--target-port",
+    default=None,
+    help="Override the Target UART data port (auto-discovered by default).",
+)
+@click.option("--baud", type=int, default=115200, show_default=True)
+@click.option(
+    "--parity", type=click.Choice(["n", "e", "o"]), default="n", show_default=True
+)
+@click.option(
+    "--stopbits",
+    "stop_bits",
+    type=click.Choice(["1", "2"]),
+    default="1",
+    show_default=True,
+)
+@click.pass_context
+def uart_console(
+    ctx: click.Context,
+    target_port: str | None,
+    baud: int,
+    parity: str,
+    stop_bits: str,
+) -> None:
+    """Enable the bridge and open a live raw byte console on it.
+
+    Enables the bridge over the scanner control shell (skipped if a
+    bridge is already running — the firmware reports `ERR busy` on a
+    second `uart enter` since the pins are already owned by this same
+    passthrough), then pumps bytes bidirectionally between this
+    terminal and the Target UART data CDC. Press Ctrl-] to exit; the
+    bridge is only disabled again on the way out if this command was
+    the one that enabled it.
+    """
+    import contextlib
+    import threading
+
+    import serial
+
+    from .usb import cdc_for
+
+    @contextlib.contextmanager
+    def _raw_terminal():
+        if platform.system() == "Windows" or not sys.stdin.isatty():
+            yield
+            return
+        import termios
+        import tty
+
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        tty.setraw(fd)
+        try:
+            yield
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+    control = _uart_control_client(ctx)
+    with control:
+        # A second `uart enter` while one is already running gets
+        # `ERR busy` from the firmware (the pins are already owned by
+        # this same passthrough) — so reuse a running bridge instead
+        # of re-entering, and only tear it down on exit if we're the
+        # one who started it.
+        already_enabled = control.uart_status().startswith("UART: enabled")
+        if already_enabled:
+            print_info(f"Bridge already running: {control.uart_status()}")
+        else:
+            print_success(
+                control.uart_enter(baud=baud, parity=parity, stop_bits=int(stop_bits))
+            )
+
+        data_port = target_port or cdc_for("target")
+        ser = serial.Serial(data_port, baud, timeout=0.1)
+        print_info(f"Bridging {data_port} — Ctrl-] to exit")
+
+        stop = threading.Event()
+
+        def _pump_serial_to_stdout() -> None:
+            while not stop.is_set():
+                chunk = ser.read(64)
+                if chunk:
+                    sys.stdout.buffer.write(chunk)
+                    sys.stdout.buffer.flush()
+
+        reader = threading.Thread(target=_pump_serial_to_stdout, daemon=True)
+        reader.start()
+        try:
+            with _raw_terminal():
+                while True:
+                    data = sys.stdin.buffer.read(1)
+                    if not data or data == b"\x1d":  # Ctrl-]
+                        break
+                    ser.write(data)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            stop.set()
+            reader.join(timeout=1.0)
+            ser.close()
+            if not already_enabled:
+                print_success(control.uart_exit())
 
 
 # -----------------------------------------------------------------------------

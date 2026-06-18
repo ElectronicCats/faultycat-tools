@@ -18,6 +18,8 @@ them without re-writing the layer. Reply prefixes:
     BPIRATE:  F8-4 binary-mode entry confirmation
     SERPROG:  F8-5 binary-mode entry confirmation
     CAMPAIGN: F9-3 demo crowbar + status + drain + stop
+    UART:     Target UART passthrough control (enter/baud/parity/
+              stopbits/status/exit) — see ``uart_*`` below
 
 This module wraps that line shell with one method per command.
 Once a binary mode is entered (``buspirate_enter`` / ``serprog_enter``)
@@ -26,6 +28,13 @@ OpenOCD / flashrom / similar — this client does NOT try to drive
 the binary protocol from inside Python; the F10-2 campaign module
 handles its own binary surface and the BusPirate / serprog modes
 have native external clients (OpenOCD, flashrom).
+
+The Target UART passthrough (``uart enter`` et al.) is different
+from BusPirate/serprog: control stays on this CDC2 text shell, but
+the actual UART traffic flows on a separate CDC (CDC3, "target
+uart" — see ``apps/faultycat_fw/main.c::uart_passthrough``). This
+client only owns the control verbs; bridging the data CDC is the
+caller's job (see ``faultycmd.core.cli``'s ``uart console``).
 """
 
 from __future__ import annotations
@@ -65,6 +74,7 @@ ACCEPTED_PREFIXES: tuple[str, ...] = (
     "BPIRATE:",
     "SERPROG:",
     "CAMPAIGN:",
+    "UART:",
 )
 
 
@@ -398,6 +408,36 @@ class ScannerClient:
             f"serprog enter {cs} {mosi} {miso} {sck}",
             accept_prefixes=("SERPROG:",),
         )
+
+    # -- Target UART passthrough — control verbs only. Data flows on a
+    #    separate CDC (the "target" role in core.usb); see the module
+    #    docstring and `faultycmd.core.cli`'s `uart console`.
+    # ---------------------------------------------------------------
+
+    def uart_enter(
+        self,
+        baud: int = 115200,
+        parity: str = "n",
+        stop_bits: int = 1,
+    ) -> str:
+        """Enable the bridge (CH0=TX/CH1=RX on the scanner header)."""
+        return self._expect_ok("UART:", f"uart enter {baud} {parity} {stop_bits}")
+
+    def uart_exit(self) -> str:
+        return self._expect_ok("UART:", "uart exit")
+
+    def uart_status(self) -> str:
+        """Returns ``UART: disabled`` or ``UART: enabled baud=... ...``."""
+        return self.send_line("uart status", accept_prefixes=("UART:",))
+
+    def uart_set_baud(self, baud: int) -> str:
+        return self._expect_ok("UART:", f"uart baud {baud}")
+
+    def uart_set_parity(self, parity: str) -> str:
+        return self._expect_ok("UART:", f"uart parity {parity}")
+
+    def uart_set_stopbits(self, stop_bits: int) -> str:
+        return self._expect_ok("UART:", f"uart stopbits {stop_bits}")
 
     # -- internals --------------------------------------------------
 
