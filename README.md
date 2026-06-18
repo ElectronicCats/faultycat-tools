@@ -62,18 +62,18 @@ that pairs with the UF2 you flashed:
 
 | Your platform                       | Download                                          | Run with                                            |
 |-------------------------------------|---------------------------------------------------|-----------------------------------------------------|
-| Windows (no Python needed)          | `faultycmd_vX.Y.Z.W.exe`                          | `.\faultycmd_vX.Y.Z.W.exe info` (see note below)    |
-| Windows with Python / Linux / macOS | `faultycmd-X.Y.Z.W-py3-none-any.whl`              | `pip install <wheel>` then `faultycmd info`         |
-| Building from source                | `faultycmd-X.Y.Z.W.tar.gz`                        | `pip install <tarball>` then `faultycmd info`       |
+| Windows (no Python needed)          | `faultycmd_vX.Y.Z.W.exe`                          | `.\faultycmd_vX.Y.Z.W.exe devices` (see note below)    |
+| Windows with Python / Linux / macOS | `faultycmd-X.Y.Z.W-py3-none-any.whl`              | `pip install <wheel>` then `faultycmd devices`         |
+| Building from source                | `faultycmd-X.Y.Z.W.tar.gz`                        | `pip install <tarball>` then `faultycmd devices`       |
 
 > **Windows `.exe` note.** From the directory the `.exe` lives in
 > (PowerShell or `cmd.exe`), the `.\` prefix is required so the
 > shell runs the local file instead of searching `PATH`:
-> `.\faultycmd_vX.Y.Z.W.exe info`. If you want a shorter command,
+> `.\faultycmd_vX.Y.Z.W.exe devices`. If you want a shorter command,
 > rename the file (e.g. to `faultycmd.exe`); invocations then
-> become `.\faultycmd.exe info`. And if you move that renamed file
+> become `.\faultycmd.exe devices`. And if you move that renamed file
 > into a folder that is already on your `PATH`, the `.\` can be
-> dropped too and you can simply type `faultycmd info` from
+> dropped too and you can simply type `faultycmd devices` from
 > anywhere.
 
 The host package validates firmware parity on every connect — see
@@ -145,7 +145,7 @@ pip install -e '.[dev]'
 > matching your firmware tag and put it anywhere convenient. The
 > `.exe` bundles Python + every dependency. Inside this Quick start
 > you'd skip steps 1 and 2 entirely and just run
-> `faultycmd_vX.Y.Z.W.exe info`.
+> `faultycmd_vX.Y.Z.W.exe devices`.
 >
 > If you installed via `pip install --user` outside a venv and your
 > shell does not recognise the `faultycmd` command, your Python
@@ -156,7 +156,7 @@ pip install -e '.[dev]'
 >     `pip install` puts `faultycmd.exe` in `<venv>\Scripts\` which
 >     is added to `PATH` on activation.
 >   - Or use the module invocation which never depends on `PATH`:
->     `python -m faultycmd info`, `python -m faultycmd tui`, etc.
+>     `python -m faultycmd devices`, `python -m faultycmd tui`, etc.
 >
 > Linux and macOS users get this for free — `pip install` adds the
 > script to a directory that is already on `PATH` for any non-root
@@ -165,7 +165,7 @@ pip install -e '.[dev]'
 ```bash
 # Discover the connected board and inspect its state.
 faultycmd --help
-faultycmd info
+faultycmd devices
 faultycmd emfi ping
 faultycmd emfi status
 
@@ -198,7 +198,7 @@ version mismatch firmware/host version mismatch:
   (unsafe — wire protocol may have shifted).
 ```
 
-`faultycmd info` is the diagnostic path that never aborts on a
+`faultycmd devices` is the diagnostic path that never aborts on a
 mismatch: it lists the CDC interfaces, probes the EMFI CDC for the
 firmware version, and prints a coloured `match` / `mismatch` line.
 The TUI shows the same parity in its header subtitle

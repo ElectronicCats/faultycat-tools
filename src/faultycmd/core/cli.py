@@ -16,7 +16,7 @@ Top-level command groups mirror the firmware's CDC layout:
     faultycmd campaign  (F9-4 campaign_proto on CDC0/CDC1, --engine)
     faultycmd scanner   (F8-2 ``scan swd`` over CDC2 text shell)
     faultycmd tui       (F10-5 Textual dashboard)
-    faultycmd info      (USB enumeration helper)
+    faultycmd devices   (USB enumeration helper)
 
 Each subcommand wraps the corresponding ``faultycmd.protocols.*``
 client. Plain status lines go through ``faultycmd.utils.output``
@@ -41,6 +41,7 @@ from pathlib import Path
 
 # External dependencies
 import click
+from rich import box
 from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
@@ -166,22 +167,22 @@ def main(ignore_version_mismatch: bool) -> None:
 
 
 # -----------------------------------------------------------------------------
-# `info`
+# `devices`
 # -----------------------------------------------------------------------------
 
 
 @main.command()
-def info() -> None:
+def devices() -> None:
     """List FaultyCat interfaces detected on this machine."""
-    print_info(f"faultycmd v{__version__} (host)")
-
     ports = discover()
     if not ports:
         print_warning("No FaultyCat CDC found.")
         print_dim("Check that the board is plugged in and re-enumerated as 1209:fa17.")
         raise SystemExit(1)
-    table = Table(title="FaultyCat CDC interfaces")
-    table.add_column("IF", style="cyan", justify="right")
+    table = Table(
+        title=f"Found {len(ports)} FaultyCat interface(s)", box=box.ROUNDED
+    )
+    table.add_column("IF", style=STYLES["device"], justify="right")
     table.add_column("role", style="green")
     table.add_column("device", style="white")
     role_by_iface = {
