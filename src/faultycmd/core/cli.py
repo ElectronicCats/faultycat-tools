@@ -32,8 +32,12 @@ without re-writing the protocol layer.
 
 from __future__ import annotations
 
+import os
+import platform
 import random as _random
+import subprocess
 import sys
+from pathlib import Path
 
 # External dependencies
 import click
@@ -772,6 +776,180 @@ def tui() -> None:
     except ImportError as e:
         raise click.ClickException(f"TUI is not available: {e}.") from e
     _run_tui()
+
+
+# -----------------------------------------------------------------------------
+# `completion`
+# -----------------------------------------------------------------------------
+
+
+@main.group(context_settings={"help_option_names": ["-h", "--help"]})
+def completion() -> None:
+    """Install shell tab completion for faultycmd."""
+
+
+@completion.command("install")
+@click.option(
+    "--shell",
+    type=click.Choice(["bash", "zsh", "fish"]),
+    default=None,
+    help="Shell to install completion for (auto-detected if omitted)",
+)
+def completion_install(shell: str | None) -> None:
+    """Install tab completion for your shell.
+
+    Run this once, then restart your shell (or source your rc file).
+
+    \b
+        faultycmd completion install          # auto-detect shell
+        faultycmd completion install --shell zsh
+    """
+    if platform.system() == "Windows":
+        print_error("Shell completion is not supported on Windows.")
+        raise SystemExit(1)
+
+    import shutil
+    import subprocess as _sp
+
+    faultycmd_bin = shutil.which("faultycmd")
+    if not faultycmd_bin:
+        print_error("'faultycmd' not found on PATH.")
+        print_dim("Install it first, e.g.: pip install -e .")
+        raise SystemExit(1)
+
+    if shell is None:
+        shell_env = os.environ.get("SHELL", "")
+        if "zsh" in shell_env:
+            shell = "zsh"
+        elif "fish" in shell_env:
+            shell = "fish"
+        elif "bash" in shell_env:
+            shell = "bash"
+        else:
+            print_error("Could not detect shell. Use --shell bash|zsh|fish.")
+            raise SystemExit(1)
+        print_info(f"Detected shell: {shell}")
+
+    env_var = "_FAULTYCMD_COMPLETE"
+
+    if shell == "bash":
+        target = (
+            Path.home()
+            / ".local"
+            / "share"
+            / "bash-completion"
+            / "completions"
+            / "faultycmd"
+        )
+        source_flag = "bash_source"
+        rc_note = None
+    elif shell == "zsh":
+        target = Path.home() / ".zfunc" / "_faultycmd"
+        source_flag = "zsh_source"
+        rc_note = "fpath=(~/.zfunc $fpath)\nautoload -Uz compinit && compinit"
+    else:  # fish
+        target = Path.home() / ".config" / "fish" / "completions" / "faultycmd.fish"
+        source_flag = "fish_source"
+        rc_note = None
+
+    try:
+        result = _sp.run(
+            [faultycmd_bin],
+            env={**os.environ, env_var: source_flag},
+            capture_output=True,
+            text=True,
+        )
+        script = result.stdout
+    except Exception as e:
+        print_error(f"Failed to generate completion script: {e}")
+        raise SystemExit(1)
+
+    if not script.strip():
+        print_error("Empty completion script generated.")
+        raise SystemExit(1)
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(script)
+    print_success(f"Completion script written to: {target}")
+
+    if rc_note:
+        zshrc = Path.home() / ".zshrc"
+        existing = zshrc.read_text() if zshrc.exists() else ""
+        if "~/.zfunc" not in existing and ".zfunc" not in existing:
+            with zshrc.open("a") as f:
+                f.write(f"\n# faultycmd tab completion\n{rc_note}\n")
+            print_success(f"Added fpath entry to {zshrc}")
+        else:
+            print_dim("~/.zfunc already in fpath — skipping .zshrc edit")
+
+    if shell == "bash":
+        print_info("Restart your shell or run:")
+        print_dim(f"source {target}")
+    elif shell == "zsh":
+        print_info("Restart your shell or run:")
+        print_dim("source ~/.zshrc && compinit -u")
+    else:
+        print_info("Completion is active immediately in new fish sessions.")
+
+
+# -----------------------------------------------------------------------------
+# `setup-env`
+# -----------------------------------------------------------------------------
+
+
+@main.command("setup-env")
+def setup_env() -> None:
+    """Setup environment: install udev rules and add user to the dialout group.
+
+    Requires root privileges (sudo). Installs the udev rule needed for
+    non-root access to the FaultyCat CDC interfaces (VID 1209, PID fa17)
+    and adds the current user to the 'dialout' group.
+    """
+    if platform.system() != "Windows" and os.geteuid() != 0:
+        print_error("Root privileges required. Please run with sudo:")
+        print_dim(f"sudo {sys.argv[0]} setup-env")
+        raise SystemExit(1)
+
+    # 1. Install udev rule
+    rules_content = (
+        "# Permission to FaultyCat (VID 1209, PID fa17)\n"
+        'SUBSYSTEM=="usb", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="fa17", '
+        'MODE="0660", GROUP="dialout", TAG+="uaccess"\n'
+    )
+    rules_path = Path("/etc/udev/rules.d/99-faultycat.rules")
+    try:
+        rules_path.write_text(rules_content)
+        print_success(f"Udev rule installed to {rules_path}")
+    except Exception as e:
+        print_error(f"Failed to install udev rule: {e}")
+
+    # 2. Add user to the dialout group
+    real_user = os.environ.get("SUDO_USER")
+    if not real_user:
+        import getpass
+
+        real_user = getpass.getuser()
+
+    try:
+        subprocess.run(["usermod", "-aG", "dialout", real_user], check=True)
+        print_success(f"User '{real_user}' added to group 'dialout'")
+    except subprocess.CalledProcessError:
+        print_warning(
+            f"Could not add user '{real_user}' to group 'dialout' (does it exist?)"
+        )
+    except Exception as e:
+        print_error(f"Error adding user to group dialout: {e}")
+
+    # 3. Reload udev rules
+    try:
+        subprocess.run(["udevadm", "control", "--reload-rules"], check=True)
+        subprocess.run(["udevadm", "trigger"], check=True)
+        print_success("Udev rules reloaded")
+    except Exception as e:
+        print_warning(f"Could not reload udev rules automatically: {e}")
+
+    print_success("Environment setup complete!")
+    print_info("Please log out and log back in for group changes to take effect.")
 
 
 # -----------------------------------------------------------------------------
