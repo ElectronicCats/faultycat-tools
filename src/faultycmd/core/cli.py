@@ -1,3 +1,12 @@
+#! /usr/bin/env python3
+
+# Electronic Cats
+# Original Creation Date: June 18, 2026
+# This code is beerware; if you see me (or any other Electronic Cats
+# member) at the local, and you've found our code helpful,
+# please buy us a round!
+# Distributed as-is; no warranty is given.
+
 """click-based CLI for faultycmd, with Rich-rendered output.
 
 Top-level command groups mirror the firmware's CDC layout:
@@ -10,8 +19,9 @@ Top-level command groups mirror the firmware's CDC layout:
     faultycmd info      (USB enumeration helper)
 
 Each subcommand wraps the corresponding ``faultycmd.protocols.*``
-client. ``click.echo`` is used only for plain status lines; Rich
-:class:`Console` handles tables, progress bars, and live displays.
+client. Plain status lines go through ``faultycmd.utils.output``
+(``print_success``/``print_error``/...); Rich :class:`Table` and
+:class:`Live` handle tables, progress bars, and live displays.
 
 JTAG and direct-SWD verbs (init/deinit/freq/idcode/connect/read32/
 write32/reset + scan-jtag) are WIP and intentionally hidden from
@@ -22,11 +32,16 @@ without re-writing the protocol layer.
 
 from __future__ import annotations
 
+import random as _random
+import sys
+
+# External dependencies
 import click
-from rich.console import Console
 from rich.live import Live
+from rich.panel import Panel
 from rich.table import Table
 
+# Internal imports
 from .. import __version__
 from ..protocols import (
     CampaignClient,
@@ -41,8 +56,58 @@ from ..protocols.crowbar import CrowbarOutput, CrowbarTrigger
 from ..protocols.emfi import EmfiTrigger
 from .usb import discover
 from ..utils.version_check import VersionMismatchError, set_allow_mismatch
+from ..utils.output import (
+    console,
+    STYLES,
+    print_success,
+    print_warning,
+    print_error,
+    print_info,
+    print_dim,
+)
 
-console = Console()
+COMPANY = "Electronic Cats - PWNLAB"
+_FUNNY_PHRASES = [
+    "Glitching bits since breakfast.",
+    "Your silicon's worst Tuesday.",
+    "Voltage is a suggestion, not a rule.",
+    "Faults happen. We make them happen on purpose.",
+    "EMFI: electromagnetic mischief, fully intended.",
+    "Crowbar in hand, secure boot in shambles.",
+    "Who needs a debugger when you have a glitch?",
+    "Making bootloaders reconsider their life choices.",
+    "One pulse closer to a root shell.",
+    "Reliability engineering's natural predator.",
+]
+
+FUNNY_PHRASE = _random.choice(_FUNNY_PHRASES)
+
+
+def print_header(module: str | None = None) -> None:
+    """Print the ASCII art header."""
+    label = f"faultycmd {module}" if module else "faultycmd"
+
+    ascii_art = f"""      :=--             --=-       |
+      -====-         -=====       |
+      :===================-       |
+       ===================:       |
+  -   :==--===========--==-   -   |  {label}
+ -===:===-   :=====-   -==-.-=--  |  v{__version__}
+--    ====-   :===-   -====    -- |  {FUNNY_PHRASE}
+-=:   :===================-   .=- |
+ ---=-- -===============-  -=---  |
+ ---       --=======--        --  |"""
+
+    colored_ascii = f"[cyan bold]{ascii_art}[/cyan bold]"
+
+    header_panel = Panel(
+        colored_ascii,
+        title=f"[cyan]{COMPANY}[/cyan]",
+        border_style=STYLES["header"],
+        title_align="left",
+        padding=(1, 2),
+    )
+    console.print(header_panel)
 
 
 # -----------------------------------------------------------------------------
@@ -94,6 +159,7 @@ def main(ignore_version_mismatch: bool) -> None:
     """faultycmd — host tool for FaultyCat v3."""
     if ignore_version_mismatch:
         set_allow_mismatch(True)
+        print_warning("Firmware/host version parity check bypassed.")
 
 
 # -----------------------------------------------------------------------------
@@ -104,14 +170,12 @@ def main(ignore_version_mismatch: bool) -> None:
 @main.command()
 def info() -> None:
     """List FaultyCat interfaces detected on this machine."""
-    console.print(f"[b]faultycmd[/b] v{__version__} (host)")
+    print_info(f"faultycmd v{__version__} (host)")
 
     ports = discover()
     if not ports:
-        console.print(
-            "[yellow]No FaultyCat CDC found.[/yellow] "
-            "Check that the board is plugged in and re-enumerated as [b]1209:fa17[/b]."
-        )
+        print_warning("No FaultyCat CDC found.")
+        print_dim("Check that the board is plugged in and re-enumerated as 1209:fa17.")
         raise SystemExit(1)
     table = Table(title="FaultyCat CDC interfaces")
     table.add_column("IF", style="cyan", justify="right")
@@ -154,14 +218,13 @@ def info() -> None:
         fw_str, fw_match = f"unreachable ({e})", None
 
     if fw_match is True:
-        console.print(f"firmware: [green]v{fw_str}[/green]  ([b]match[/b])")
+        print_success(f"firmware: v{fw_str}  (match)")
     elif fw_match is False:
-        console.print(
-            f"firmware: [red]v{fw_str}[/red]  (host v{__version__} — "
-            f"[b]mismatch[/b], re-flash to recover)"
+        print_error(
+            f"firmware: v{fw_str}  (host v{__version__} — mismatch, re-flash to recover)"
         )
     else:
-        console.print(f"firmware: [yellow]{fw_str}[/yellow]")
+        print_warning(f"firmware: {fw_str}")
 
 
 # -----------------------------------------------------------------------------
@@ -188,7 +251,7 @@ def ping(ctx: click.Context) -> None:
     """Verify communication with the EMFI module."""
     with _emfi_client(ctx) as cli:
         rpl = cli.ping()
-    console.print(f"[green]PONG[/green] {rpl!r}")
+    print_success(f"PONG {rpl!r}")
 
 
 @emfi.command()
@@ -240,8 +303,8 @@ def configure(
     trig = EmfiTrigger[trigger.upper()]
     with _emfi_client(ctx) as cli:
         cli.configure(trig, delay_us, width_us, charge_timeout_ms)
-    console.print(
-        f"[green]configured[/green] trigger={trig.name} delay={delay_us}us width={width_us}us"
+    print_success(
+        f"configured trigger={trig.name} delay={delay_us}us width={width_us}us"
     )
 
 
@@ -251,7 +314,7 @@ def arm(ctx: click.Context) -> None:
     """Arm the module (charge the high-voltage capacitor)."""
     with _emfi_client(ctx) as cli:
         cli.arm()
-    console.print("[green]armed[/green]")
+    print_success("armed")
 
 
 @emfi.command()
@@ -267,7 +330,7 @@ def fire(ctx: click.Context, trigger_timeout_ms: int) -> None:
     """Wait for the trigger and fire the EMFI pulse."""
     with _emfi_client(ctx) as cli:
         cli.fire(trigger_timeout_ms)
-    console.print("[green]fire dispatched[/green]")
+    print_success("fire dispatched")
 
 
 @emfi.command()
@@ -276,7 +339,7 @@ def disarm(ctx: click.Context) -> None:
     """Disarm the EMFI module."""
     with _emfi_client(ctx) as cli:
         cli.disarm()
-    console.print("[green]disarmed[/green]")
+    print_success("disarmed")
 
 
 @emfi.command()
@@ -310,9 +373,9 @@ def capture(
     if out_file:
         with open(out_file, "wb") as fh:
             fh.write(data)
-        console.print(f"[green]wrote[/green] {len(data)} bytes → {out_file}")
+        print_success(f"wrote {len(data)} bytes → {out_file}")
     else:
-        console.print(f"[cyan]{len(data)} bytes[/cyan]: {data.hex()}")
+        print_info(f"{len(data)} bytes: {data.hex()}")
 
 
 # -----------------------------------------------------------------------------
@@ -339,7 +402,7 @@ def crowbar_ping(ctx: click.Context) -> None:
     """Verify communication with the crowbar."""
     with _crowbar_client(ctx) as cli:
         rpl = cli.ping()
-    console.print(f"[green]PONG[/green] {rpl!r}")
+    print_success(f"PONG {rpl!r}")
 
 
 @crowbar.command("status")
@@ -395,8 +458,8 @@ def crowbar_configure(
     out = CrowbarOutput[output_str.upper()]
     with _crowbar_client(ctx) as cli:
         cli.configure(trig, out, delay_us, width_ns)
-    console.print(
-        f"[green]configured[/green] trigger={trig.name} output={out.name} "
+    print_success(
+        f"configured trigger={trig.name} output={out.name} "
         f"delay={delay_us}us width={width_ns}ns"
     )
 
@@ -407,7 +470,7 @@ def crowbar_arm(ctx: click.Context) -> None:
     """Arm the crowbar."""
     with _crowbar_client(ctx) as cli:
         cli.arm()
-    console.print("[green]armed[/green]")
+    print_success("armed")
 
 
 @crowbar.command("fire")
@@ -423,7 +486,7 @@ def crowbar_fire(ctx: click.Context, trigger_timeout_ms: int) -> None:
     """Wait for the trigger and fire the glitch."""
     with _crowbar_client(ctx) as cli:
         cli.fire(trigger_timeout_ms)
-    console.print("[green]fire dispatched[/green]")
+    print_success("fire dispatched")
 
 
 @crowbar.command("disarm")
@@ -432,7 +495,7 @@ def crowbar_disarm(ctx: click.Context) -> None:
     """Disarm the crowbar."""
     with _crowbar_client(ctx) as cli:
         cli.disarm()
-    console.print("[green]disarmed[/green]")
+    print_success("disarmed")
 
 
 # -----------------------------------------------------------------------------
@@ -505,7 +568,7 @@ def campaign_configure(
             _parse_axis(power),
             settle_ms=settle_ms,
         )
-    console.print("[green]configured[/green]")
+    print_success("configured")
 
 
 @campaign.command("start")
@@ -514,7 +577,7 @@ def campaign_start(ctx: click.Context) -> None:
     """Start the sweep."""
     with _campaign_client(ctx) as cli:
         cli.start()
-    console.print("[green]started[/green]")
+    print_success("started")
 
 
 @campaign.command("stop")
@@ -523,7 +586,7 @@ def campaign_stop(ctx: click.Context) -> None:
     """Stop the running sweep."""
     with _campaign_client(ctx) as cli:
         cli.stop()
-    console.print("[green]stopped[/green]")
+    print_success("stopped")
 
 
 @campaign.command("drain")
@@ -554,7 +617,7 @@ def campaign_drain(ctx: click.Context, max_count: int) -> None:
                 )
             )
     if not rows:
-        console.print("[yellow]ring empty[/yellow]")
+        print_warning("ring empty")
         return
     table = Table(title=f"Campaign results ({len(rows)})")
     for col, just in [
@@ -608,8 +671,8 @@ def campaign_watch(ctx: click.Context, every_ms: int) -> None:
             live.update(_render())
     if last_status is not None:
         st = last_status
-        console.print(
-            f"[bold]done[/bold] state={st.state.name if hasattr(st.state, 'name') else st.state} "
+        print_success(
+            f"done state={st.state.name if hasattr(st.state, 'name') else st.state} "
             f"step={st.step_n}/{st.total_steps} pushed={st.results_pushed} dropped={st.results_dropped}"
         )
 
@@ -679,16 +742,18 @@ def tui() -> None:
 def _wrap_main() -> None:
     """Top-level wrapper that converts our protocol exceptions into
     user-friendly click messages."""
+    module = next((a for a in sys.argv[1:] if not a.startswith("-")), None)
+    print_header(module)
     try:
         main()
     except VersionMismatchError as e:
-        console.print(f"[red]version mismatch[/red] {e}")
+        print_error(f"version mismatch: {e}")
         raise SystemExit(3) from e
     except (EngineError, CampaignError, ScannerError) as e:
-        console.print(f"[red]error[/red] {e}")
+        print_error(str(e))
         raise SystemExit(2) from e
     except FileNotFoundError as e:
-        console.print(f"[red]not found[/red] {e}")
+        print_error(f"not found: {e}")
         raise SystemExit(2) from e
 
 
