@@ -72,6 +72,15 @@ class CrowbarErr(IntEnum):
     PATH_NOT_SELECTED = 5
 
 
+_ERR_HINTS: dict[CrowbarErr, str] = {
+    CrowbarErr.BAD_CONFIG: "run 'crowbar configure' before 'crowbar arm'",
+    CrowbarErr.TRIGGER_TIMEOUT: "no trigger pulse received before the timeout elapsed",
+    CrowbarErr.PIO_FAULT: "PIO hardware fault — check wiring/connections",
+    CrowbarErr.INTERNAL: "internal firmware fault — try 'crowbar disarm' then retry",
+    CrowbarErr.PATH_NOT_SELECTED: "select an output path with --output before arming/firing",
+}
+
+
 @dataclass
 class CrowbarStatus:
     state: CrowbarState
@@ -137,9 +146,11 @@ class CrowbarClient(BinaryProtoClient):
         if code != CrowbarErr.NONE:
             try:
                 err = CrowbarErr(code)
-                raise EngineError(code, f"crowbar err: {err.name}")
             except ValueError:
                 raise EngineError(code) from None
+            hint = _ERR_HINTS.get(err)
+            label = f"crowbar err: {err.name}" + (f" — {hint}" if hint else "")
+            raise EngineError(code, label)
 
 
 __all__ = [

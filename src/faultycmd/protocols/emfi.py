@@ -64,6 +64,15 @@ class EmfiErr(IntEnum):
     INTERNAL = 5
 
 
+_ERR_HINTS: dict[EmfiErr, str] = {
+    EmfiErr.BAD_CONFIG: "run 'emfi configure' before 'emfi arm' (or check --width-us is within 1..50)",
+    EmfiErr.HV_NOT_CHARGED: "HV capacitor not charged yet — wait, or check 'emfi status'",
+    EmfiErr.TRIGGER_TIMEOUT: "no trigger pulse received before the timeout elapsed",
+    EmfiErr.PIO_FAULT: "PIO hardware fault — check wiring/connections",
+    EmfiErr.INTERNAL: "internal firmware fault — try 'emfi disarm' then retry",
+}
+
+
 @dataclass
 class EmfiStatus:
     state: EmfiState
@@ -151,9 +160,11 @@ class EmfiClient(BinaryProtoClient):
         if code != EmfiErr.NONE:
             try:
                 err = EmfiErr(code)
-                raise EngineError(code, f"emfi err: {err.name}")
             except ValueError:
                 raise EngineError(code) from None
+            hint = _ERR_HINTS.get(err)
+            label = f"emfi err: {err.name}" + (f" — {hint}" if hint else "")
+            raise EngineError(code, label)
 
 
 __all__ = [

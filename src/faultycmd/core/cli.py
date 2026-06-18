@@ -221,13 +221,13 @@ def info() -> None:
         fw_str, fw_match = f"unreachable ({e})", None
 
     if fw_match is True:
-        print_success(f"firmware: v{fw_str}  (match)")
+        print_success(f"Firmware: v{fw_str}  (match)")
     elif fw_match is False:
         print_error(
-            f"firmware: v{fw_str}  (host v{__version__} — mismatch, re-flash to recover)"
+            f"Firmware: v{fw_str}  (host v{__version__} — mismatch, re-flash to recover)"
         )
     else:
-        print_warning(f"firmware: {fw_str}")
+        print_warning(f"Firmware: {fw_str}")
 
 
 # -----------------------------------------------------------------------------
@@ -311,7 +311,7 @@ def configure(
     with _emfi_client(ctx) as cli:
         cli.configure(trig, delay_us, width_us, charge_timeout_ms)
     print_success(
-        f"configured trigger={trig.name} delay={delay_us}us width={width_us}us"
+        f"Configured trigger={trig.name} delay={delay_us}us width={width_us}us"
     )
 
 
@@ -321,7 +321,7 @@ def arm(ctx: click.Context) -> None:
     """Arm the module (charge the high-voltage capacitor)."""
     with _emfi_client(ctx) as cli:
         cli.arm()
-    print_success("armed")
+    print_success("Armed")
 
 
 @emfi.command()
@@ -337,7 +337,7 @@ def fire(ctx: click.Context, trigger_timeout_ms: int) -> None:
     """Wait for the trigger and fire the EMFI pulse."""
     with _emfi_client(ctx) as cli:
         cli.fire(trigger_timeout_ms)
-    print_success("fire dispatched")
+    print_success("Fire dispatched")
 
 
 @emfi.command()
@@ -346,7 +346,7 @@ def disarm(ctx: click.Context) -> None:
     """Disarm the EMFI module."""
     with _emfi_client(ctx) as cli:
         cli.disarm()
-    print_success("disarmed")
+    print_success("Disarmed")
 
 
 @emfi.command()
@@ -384,7 +384,7 @@ def capture(
     if out_file:
         with open(out_file, "wb") as fh:
             fh.write(data)
-        print_success(f"wrote {len(data)} bytes → {out_file}")
+        print_success(f"Wrote {len(data)} bytes → {out_file}")
     else:
         print_info(f"{len(data)} bytes: {data.hex()}")
 
@@ -481,8 +481,8 @@ def crowbar_configure(
     with _crowbar_client(ctx) as cli:
         cli.configure(trig, out, delay_us, width_ns)
     print_success(
-        f"configured trigger={trig.name} output={out.name} "
-        f"delay={delay_us}us width={width_ns}ns"
+        f"Configured trigger={trig.name} output={out.name} "
+        f"Delay={delay_us}us width={width_ns}ns"
     )
 
 
@@ -492,7 +492,7 @@ def crowbar_arm(ctx: click.Context) -> None:
     """Arm the crowbar."""
     with _crowbar_client(ctx) as cli:
         cli.arm()
-    print_success("armed")
+    print_success("Armed")
 
 
 @crowbar.command("fire")
@@ -508,7 +508,7 @@ def crowbar_fire(ctx: click.Context, trigger_timeout_ms: int) -> None:
     """Wait for the trigger and fire the glitch."""
     with _crowbar_client(ctx) as cli:
         cli.fire(trigger_timeout_ms)
-    print_success("fire dispatched")
+    print_success("Fire dispatched")
 
 
 @crowbar.command("disarm")
@@ -517,7 +517,7 @@ def crowbar_disarm(ctx: click.Context) -> None:
     """Disarm the crowbar."""
     with _crowbar_client(ctx) as cli:
         cli.disarm()
-    print_success("disarmed")
+    print_success("Disarmed")
 
 
 # -----------------------------------------------------------------------------
@@ -600,7 +600,7 @@ def campaign_configure(
             _parse_axis(power),
             settle_ms=settle_ms,
         )
-    print_success("configured")
+    print_success("Configured")
 
 
 @campaign.command("start")
@@ -609,7 +609,7 @@ def campaign_start(ctx: click.Context) -> None:
     """Start the sweep."""
     with _campaign_client(ctx) as cli:
         cli.start()
-    print_success("started")
+    print_success("Started")
 
 
 @campaign.command("stop")
@@ -618,7 +618,7 @@ def campaign_stop(ctx: click.Context) -> None:
     """Stop the running sweep."""
     with _campaign_client(ctx) as cli:
         cli.stop()
-    print_success("stopped")
+    print_success("Stopped")
 
 
 @campaign.command("drain")
@@ -649,7 +649,7 @@ def campaign_drain(ctx: click.Context, max_count: int) -> None:
                 )
             )
     if not rows:
-        print_warning("ring empty")
+        print_warning("Ring empty")
         return
     table = Table(title=f"Campaign results ({len(rows)})")
     for col, just in [
@@ -965,7 +965,7 @@ def _wrap_main() -> None:
     try:
         main()
     except VersionMismatchError as e:
-        print_error(f"version mismatch: {e}")
+        print_error(f"Version mismatch: {e}")
         raise SystemExit(3) from e
     except (EngineError, CampaignError, ScannerError) as e:
         print_error(str(e))
