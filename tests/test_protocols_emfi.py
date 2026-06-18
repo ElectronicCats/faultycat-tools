@@ -114,7 +114,9 @@ def test_disarm_always_returns():
 
 
 def test_status_decodes_struct():
-    payload = bytes([EmfiState.FIRED, EmfiErr.NONE]) + struct.pack("<IIII", 12345, 8192, 5, 1000)
+    payload = bytes([EmfiState.FIRED, EmfiErr.NONE]) + struct.pack(
+        "<IIII", 12345, 8192, 5, 1000
+    )
     fake = FakeSerial()
     fake.queue_reply(CMD_STATUS, payload)
     with _client(fake) as cli:

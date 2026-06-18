@@ -96,7 +96,9 @@ def _status_payload(
     pushed: int = 0,
     dropped: int = 0,
 ) -> bytes:
-    return bytes([state, err, 0, 0]) + struct.pack("<4I", step_n, total, pushed, dropped)
+    return bytes([state, err, 0, 0]) + struct.pack(
+        "<4I", step_n, total, pushed, dropped
+    )
 
 
 def test_status_decodes():

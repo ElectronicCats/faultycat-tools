@@ -82,7 +82,11 @@ from .modals import (
     ScannerFormState,
 )
 from ..core.usb import PortDiscoveryError, cdc_for
-from ..utils.version_check import VersionMismatchError, allow_mismatch, host_version_tuple
+from ..utils.version_check import (
+    VersionMismatchError,
+    allow_mismatch,
+    host_version_tuple,
+)
 
 # -----------------------------------------------------------------------------
 # Diag snapshot parser — matches the line emitted every 500 ms by
@@ -638,7 +642,9 @@ class FaultycmdTUI(App[None]):
                 "last_fire_ms": str(st.last_fire_at_ms),
                 "width_ns": str(st.pulse_width_ns_actual),
                 "delay_us": str(st.delay_us_actual),
-                "output": st.output.name if hasattr(st.output, "name") else str(st.output),
+                "output": (
+                    st.output.name if hasattr(st.output, "name") else str(st.output)
+                ),
             }
         )
 
@@ -714,7 +720,9 @@ class FaultycmdTUI(App[None]):
                 if not self._closing:
                     try:
                         self.call_from_thread(
-                            lambda: self.notify(f"Scanner error: {err}", severity="error")
+                            lambda: self.notify(
+                                f"Scanner error: {err}", severity="error"
+                            )
                         )
                     except RuntimeError:
                         pass
@@ -735,7 +743,9 @@ class FaultycmdTUI(App[None]):
                     if self.conn.last_error:
                         err = self.conn.last_error
                         try:
-                            self.call_from_thread(lambda: self.notify(err, severity="error"))
+                            self.call_from_thread(
+                                lambda: self.notify(err, severity="error")
+                            )
                         except RuntimeError:
                             pass
                     else:

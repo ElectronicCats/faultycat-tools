@@ -51,7 +51,9 @@ class EngineError(Exception):
 SerialFactory = Callable[[str, int, float], _SerialLike]
 
 
-def _default_serial_factory(port: str, baud: int, per_byte_timeout: float) -> _SerialLike:
+def _default_serial_factory(
+    port: str, baud: int, per_byte_timeout: float
+) -> _SerialLike:
     """Real :func:`serial.Serial` factory. Imports pyserial lazily so
     tests that inject a fake factory don't need pyserial installed."""
     import serial  # noqa: PLC0415 — lazy to keep the test surface tiny
@@ -148,7 +150,9 @@ class BinaryProtoClient:
 
     def _require_serial(self) -> _SerialLike:
         if self._ser is None:
-            raise RuntimeError("client not open — use it as a context manager or call open() first")
+            raise RuntimeError(
+                "client not open — use it as a context manager or call open() first"
+            )
         return self._ser
 
     def _send(self, cmd: int, payload: bytes = b"") -> bytes:

@@ -210,7 +210,9 @@ def discover() -> list[FaultyCatPort]:
     # not already claimed by ports that resolved cleanly.
     if unresolved:
         claimed = {p.interface for p in found}
-        remaining_ifaces = [n for n in sorted(INTERFACE_NUMBERS.values()) if n not in claimed]
+        remaining_ifaces = [
+            n for n in sorted(INTERFACE_NUMBERS.values()) if n not in claimed
+        ]
         for port, iface in zip(
             sorted(unresolved, key=lambda p: p.device), remaining_ifaces, strict=False
         ):
@@ -237,7 +239,9 @@ def cdc_for(role: Role) -> str:
             interface (board not enumerated, or different VID/PID).
     """
     if role not in INTERFACE_NUMBERS:
-        raise ValueError(f"unknown role {role!r}; expected one of {sorted(INTERFACE_NUMBERS)}")
+        raise ValueError(
+            f"unknown role {role!r}; expected one of {sorted(INTERFACE_NUMBERS)}"
+        )
     target_iface = INTERFACE_NUMBERS[role]
     ports = discover()
     for port in ports:

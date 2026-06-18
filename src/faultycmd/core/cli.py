@@ -281,7 +281,11 @@ def status(ctx: click.Context) -> None:
 )
 @click.option("--delay-us", type=int, default=0, show_default=True)
 @click.option(
-    "--width-us", type=int, default=5, show_default=True, help="Pulse width in µs (1..50)."
+    "--width-us",
+    type=int,
+    default=5,
+    show_default=True,
+    help="Pulse width in µs (1..50).",
 )
 @click.option(
     "--charge-timeout-ms",
@@ -343,7 +347,11 @@ def disarm(ctx: click.Context) -> None:
 
 @emfi.command()
 @click.option(
-    "--offset", type=int, default=0, show_default=True, help="Start position within the buffer."
+    "--offset",
+    type=int,
+    default=0,
+    show_default=True,
+    help="Start position within the buffer.",
 )
 @click.option(
     "--length",
@@ -418,7 +426,10 @@ def crowbar_status(ctx: click.Context) -> None:
             ("last_fire_at_ms", str(st.last_fire_at_ms)),
             ("pulse_width_ns_actual", str(st.pulse_width_ns_actual)),
             ("delay_us_actual", str(st.delay_us_actual)),
-            ("output", st.output.name if hasattr(st.output, "name") else str(st.output)),
+            (
+                "output",
+                st.output.name if hasattr(st.output, "name") else str(st.output),
+            ),
         ],
     )
 
@@ -439,10 +450,18 @@ def crowbar_status(ctx: click.Context) -> None:
     help="lp = low power, hp = high power (real glitch).",
 )
 @click.option(
-    "--delay-us", type=int, default=0, show_default=True, help="Delay after the trigger in µs."
+    "--delay-us",
+    type=int,
+    default=0,
+    show_default=True,
+    help="Delay after the trigger in µs.",
 )
 @click.option(
-    "--width-ns", type=int, default=200, show_default=True, help="Pulse width in ns (8..50000)."
+    "--width-ns",
+    type=int,
+    default=200,
+    show_default=True,
+    help="Pulse width in ns (8..50000).",
 )
 @click.pass_context
 def crowbar_configure(
@@ -542,14 +561,24 @@ def campaign_status(ctx: click.Context) -> None:
 
 @campaign.command("configure")
 @click.option(
-    "--delay", required=True, help="Delay range in µs (START:END:STEP, or a fixed value)."
-)
-@click.option("--width", required=True, help="Pulse width range (µs on EMFI, ns on crowbar).")
-@click.option(
-    "--power", required=True, help="Power range. On crowbar: 1=low, 2=high. Ignored on EMFI."
+    "--delay",
+    required=True,
+    help="Delay range in µs (START:END:STEP, or a fixed value).",
 )
 @click.option(
-    "--settle-ms", type=int, default=0, show_default=True, help="Settle time between shots in ms."
+    "--width", required=True, help="Pulse width range (µs on EMFI, ns on crowbar)."
+)
+@click.option(
+    "--power",
+    required=True,
+    help="Power range. On crowbar: 1=low, 2=high. Ignored on EMFI.",
+)
+@click.option(
+    "--settle-ms",
+    type=int,
+    default=0,
+    show_default=True,
+    help="Settle time between shots in ms.",
 )
 @click.pass_context
 def campaign_configure(
@@ -636,7 +665,13 @@ def campaign_drain(ctx: click.Context, max_count: int) -> None:
 
 
 @campaign.command("watch")
-@click.option("--every-ms", type=int, default=200, show_default=True, help="Update interval in ms.")
+@click.option(
+    "--every-ms",
+    type=int,
+    default=200,
+    show_default=True,
+    help="Update interval in ms.",
+)
 @click.pass_context
 def campaign_watch(ctx: click.Context, every_ms: int) -> None:
     """Follow the sweep live until it completes."""
@@ -644,7 +679,9 @@ def campaign_watch(ctx: click.Context, every_ms: int) -> None:
     seen_results: list = []
 
     def _render() -> Table:
-        t = Table(title=f"Campaign live ({engine}) — {len(seen_results)} results so far")
+        t = Table(
+            title=f"Campaign live ({engine}) — {len(seen_results)} results so far"
+        )
         for col in ("step", "delay", "width", "power", "fire", "verify", "target"):
             t.add_column(col, justify="right")
         for r in seen_results[-15:]:
@@ -701,7 +738,11 @@ def _scanner_client(ctx: click.Context) -> ScannerClient:
     help="Optional hex value (discovery sweeps the whole bus by default).",
 )
 @click.option(
-    "--timeout-s", type=float, default=30.0, show_default=True, help="Max scan time in seconds."
+    "--timeout-s",
+    type=float,
+    default=30.0,
+    show_default=True,
+    help="Max scan time in seconds.",
 )
 @click.pass_context
 def scanner_scan_swd(

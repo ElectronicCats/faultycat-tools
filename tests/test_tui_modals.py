@@ -49,7 +49,9 @@ def test_emfi_form_state_from_dict_ignores_unknown_keys():
 
 
 def test_emfi_form_state_to_dict_roundtrip():
-    s = EmfiFormState(trigger="ext_pulse_pos", delay_us=1200, width_us=10, charge_timeout_ms=500)
+    s = EmfiFormState(
+        trigger="ext_pulse_pos", delay_us=1200, width_us=10, charge_timeout_ms=500
+    )
     d = s.to_dict()
     s2 = EmfiFormState.from_dict(d)
     assert s == s2
@@ -352,13 +354,17 @@ def test_campaign_form_state_from_dict_partial():
 
 
 def test_campaign_form_state_to_dict_roundtrip():
-    s = CampaignFormState(delay="500:5000:500", width="100:200:50", power="1:2:1", settle_ms=20)
+    s = CampaignFormState(
+        delay="500:5000:500", width="100:200:50", power="1:2:1", settle_ms=20
+    )
     s2 = CampaignFormState.from_dict(s.to_dict())
     assert s == s2
 
 
 def test_campaign_form_state_parse_emits_triplets():
-    s = CampaignFormState(delay="1000:3000:1000", width="200:300:100", power="1:1:0", settle_ms=50)
+    s = CampaignFormState(
+        delay="1000:3000:1000", width="200:300:100", power="1:1:0", settle_ms=50
+    )
     delay, width, power, settle = s.parse()
     assert delay == (1000, 3000, 1000)
     assert width == (200, 300, 100)
@@ -431,7 +437,8 @@ def test_campaign_client_method_signatures_unchanged():
         sig = inspect.signature(getattr(CampaignClient, method))
         params = {p for p in sig.parameters if p != "self"}
         assert expected.issubset(params), (
-            f"CampaignClient.{method} lost kwargs: " f"expected {expected}, got {params}"
+            f"CampaignClient.{method} lost kwargs: "
+            f"expected {expected}, got {params}"
         )
 
 
@@ -460,5 +467,6 @@ def test_emfi_client_method_signatures_unchanged():
         # Drop `self`.
         params = {p for p in sig.parameters if p != "self"}
         assert expected_kwargs.issubset(params), (
-            f"EmfiClient.{method} lost kwargs: " f"expected {expected_kwargs}, got {params}"
+            f"EmfiClient.{method} lost kwargs: "
+            f"expected {expected_kwargs}, got {params}"
         )

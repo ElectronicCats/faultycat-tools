@@ -127,7 +127,8 @@ def read_frame(reader: _ByteReader, timeout: float = 2.0) -> tuple[int, bytes]:
         calc = crc16_ccitt(header + payload)
         if expected != calc:
             raise FrameCRCError(
-                f"CRC mismatch on cmd=0x{cmd:02X}: " f"expected 0x{expected:04X}, calc 0x{calc:04X}"
+                f"CRC mismatch on cmd=0x{cmd:02X}: "
+                f"expected 0x{expected:04X}, calc 0x{calc:04X}"
             )
         return cmd, payload
     raise FrameTimeout(f"no frame received within {timeout:.1f}s")

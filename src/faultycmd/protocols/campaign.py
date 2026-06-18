@@ -244,7 +244,11 @@ class CampaignClient(BinaryProtoClient):
             time.sleep(gap_ms / 1000.0)
             results = self.drain(DRAIN_MAX_COUNT)
             yield st, results
-            if st.state in (CampaignState.DONE, CampaignState.STOPPED, CampaignState.ERROR):
+            if st.state in (
+                CampaignState.DONE,
+                CampaignState.STOPPED,
+                CampaignState.ERROR,
+            ):
                 return
             time.sleep(every_ms / 1000.0)
 

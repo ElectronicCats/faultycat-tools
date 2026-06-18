@@ -97,7 +97,9 @@ class EmfiClient(BinaryProtoClient):
     ) -> None:
         """Configure the next fire path. Raises :class:`EngineError`
         if the firmware rejects the params (typically BAD_CONFIG)."""
-        payload = bytes([int(trigger)]) + struct.pack("<III", delay_us, width_us, charge_timeout_ms)
+        payload = bytes([int(trigger)]) + struct.pack(
+            "<III", delay_us, width_us, charge_timeout_ms
+        )
         self._raise_on_err(self._send(CMD_CONFIGURE, payload))
 
     def arm(self) -> None:

@@ -99,7 +99,9 @@ class CrowbarClient(BinaryProtoClient):
         delay_us: int,
         width_ns: int,
     ) -> None:
-        payload = bytes([int(trigger), int(output)]) + struct.pack("<II", delay_us, width_ns)
+        payload = bytes([int(trigger), int(output)]) + struct.pack(
+            "<II", delay_us, width_ns
+        )
         self._raise_on_err(self._send(CMD_CONFIGURE, payload))
 
     def arm(self) -> None:

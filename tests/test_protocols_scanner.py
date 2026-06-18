@@ -46,7 +46,9 @@ class FakeShellSerial:
 
 def _client(fake: FakeShellSerial) -> ScannerClient:
     factory = lambda *_a, **_kw: fake  # noqa: E731
-    return ScannerClient("/dev/null", serial_factory=factory, check_firmware_version=False)
+    return ScannerClient(
+        "/dev/null", serial_factory=factory, check_firmware_version=False
+    )
 
 
 # -- low-level send_line ------------------------------------------
@@ -94,7 +96,9 @@ def test_swd_connect_parses_dpidr():
 
 def test_swd_idcode_parses_dpidr_and_uses_new_command():
     fake = FakeShellSerial()
-    fake.queue_lines("SWD: OK bus-detect dpidr=0x0BC12477")  # RP2040 is just one example.
+    fake.queue_lines(
+        "SWD: OK bus-detect dpidr=0x0BC12477"
+    )  # RP2040 is just one example.
     with _client(fake) as cli:
         line, dpidr = cli._swd_idcode()
     assert "OK bus-detect" in line

@@ -44,7 +44,9 @@ def _windows_port(dev: str, vid: int, pid: int, iface: int) -> FakePort:
         device=dev,
         vid=vid,
         pid=pid,
-        hwid=(f"USB VID:PID={vid:04X}:{pid:04X} SER=FLT3-XXXX " f"LOCATION=1-3:x.{iface}"),
+        hwid=(
+            f"USB VID:PID={vid:04X}:{pid:04X} SER=FLT3-XXXX " f"LOCATION=1-3:x.{iface}"
+        ),
         location=f"1-3:x.{iface}",
     )
 
@@ -67,7 +69,10 @@ def _macos_port(
         device=dev,
         vid=vid,
         pid=pid,
-        hwid=(f"USB VID:PID={vid:04X}:{pid:04X} " "SER=FLT3-E6633C805B3A3827 LOCATION=20-2"),
+        hwid=(
+            f"USB VID:PID={vid:04X}:{pid:04X} "
+            "SER=FLT3-E6633C805B3A3827 LOCATION=20-2"
+        ),
         location="20-2",
         interface=iface_string,
     )
@@ -115,7 +120,9 @@ def macos_with_iinterface_environment(monkeypatch):
     fallback should fire before the device-name parse."""
     ports = [
         _macos_port("/dev/cu.usbmodem14201", 0x1209, 0xFA17, "FaultyCat EMFI Control"),
-        _macos_port("/dev/cu.usbmodem14203", 0x1209, 0xFA17, "FaultyCat Crowbar Control"),
+        _macos_port(
+            "/dev/cu.usbmodem14203", 0x1209, 0xFA17, "FaultyCat Crowbar Control"
+        ),
         _macos_port("/dev/cu.usbmodem14205", 0x1209, 0xFA17, "FaultyCat Scanner Shell"),
         _macos_port("/dev/cu.usbmodem14207", 0x1209, 0xFA17, "FaultyCat Target UART"),
     ]

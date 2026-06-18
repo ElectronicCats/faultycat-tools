@@ -48,7 +48,9 @@ class _SerialLike(Protocol):
 SerialFactory = Callable[[str, int, float], _SerialLike]
 
 
-def _default_serial_factory(port: str, baud: int, per_byte_timeout: float) -> _SerialLike:
+def _default_serial_factory(
+    port: str, baud: int, per_byte_timeout: float
+) -> _SerialLike:
     import serial  # noqa: PLC0415
 
     return serial.Serial(port, baud, timeout=per_byte_timeout)
@@ -153,7 +155,9 @@ class ScannerClient:
 
     def _require_serial(self) -> _SerialLike:
         if self._ser is None:
-            raise RuntimeError("client not open — use as a context manager or call open() first")
+            raise RuntimeError(
+                "client not open — use as a context manager or call open() first"
+            )
         return self._ser
 
     # -- low-level send / receive -----------------------------------
@@ -232,7 +236,10 @@ class ScannerClient:
                 continue
             # No new bytes — apply the quiet-timeout if we already
             # collected at least one line.
-            if last_match_at is not None and (time.time() - last_match_at) * 1000 > quiet_ms:
+            if (
+                last_match_at is not None
+                and (time.time() - last_match_at) * 1000 > quiet_ms
+            ):
                 return out
             time.sleep(0.01)
         if out:
@@ -247,7 +254,9 @@ class ScannerClient:
     #    if they were stable API.
     # ---------------------------------------------------------------
 
-    def _swd_init(self, swclk_gp: int = 0, swdio_gp: int = 1, nrst_gp: int | None = 2) -> str:
+    def _swd_init(
+        self, swclk_gp: int = 0, swdio_gp: int = 1, nrst_gp: int | None = 2
+    ) -> str:
         if nrst_gp is None:
             cmd = f"swd init {swclk_gp} {swdio_gp}"
         else:
