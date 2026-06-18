@@ -27,8 +27,8 @@ from rich.console import Console
 from rich.live import Live
 from rich.table import Table
 
-from . import __version__
-from .protocols import (
+from .. import __version__
+from ..protocols import (
     CampaignClient,
     CampaignError,
     CrowbarClient,
@@ -37,10 +37,10 @@ from .protocols import (
     ScannerClient,
     ScannerError,
 )
-from .protocols.crowbar import CrowbarOutput, CrowbarTrigger
-from .protocols.emfi import EmfiTrigger
+from ..protocols.crowbar import CrowbarOutput, CrowbarTrigger
+from ..protocols.emfi import EmfiTrigger
 from .usb import discover
-from .version_check import VersionMismatchError, set_allow_mismatch
+from ..utils.version_check import VersionMismatchError, set_allow_mismatch
 
 console = Console()
 
@@ -145,7 +145,7 @@ def info() -> None:
             probe = EmfiClient(emfi_port, check_firmware_version=False)
             with probe as cli:
                 payload = cli.ping()
-            from .version_check import host_version_tuple, parse_ping_version
+            from ..utils.version_check import host_version_tuple, parse_ping_version
 
             fw_tuple = parse_ping_version(payload)
             fw_str = ".".join(str(v) for v in fw_tuple)
@@ -665,7 +665,7 @@ def scanner_scan_swd(
 def tui() -> None:
     """Launch the interactive dashboard."""
     try:
-        from .tui import run as _run_tui
+        from ..tui.app import run as _run_tui
     except ImportError as e:
         raise click.ClickException(f"TUI is not available: {e}.") from e
     _run_tui()

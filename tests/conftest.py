@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from faultycmd.framing import build_frame
+from faultycmd.core.framing import build_frame
 
 
 class FakeSerial:

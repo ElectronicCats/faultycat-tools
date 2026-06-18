@@ -1,11 +1,11 @@
-"""Unit tests for faultycmd.version_check."""
+"""Unit tests for faultycmd.utils.version_check."""
 
 from __future__ import annotations
 
 import pytest
 
 from faultycmd import __version__
-from faultycmd.version_check import (
+from faultycmd.utils.version_check import (
     VersionMismatchError,
     allow_mismatch,
     assert_version_match,

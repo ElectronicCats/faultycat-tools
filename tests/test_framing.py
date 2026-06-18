@@ -1,4 +1,4 @@
-"""Unit tests for faultycmd.framing — CRC, build_frame, read_frame."""
+"""Unit tests for faultycmd.core.framing — CRC, build_frame, read_frame."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import struct
 
 import pytest
 
-from faultycmd.framing import (
+from faultycmd.core.framing import (
     FrameCRCError,
     FrameTimeout,
     build_frame,

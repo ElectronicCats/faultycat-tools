@@ -56,9 +56,9 @@ from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.widgets import Button, Footer, Header, Label, Static
 
-from . import __version__
-from .persistence import LastConfig
-from .protocols import (
+from .. import __version__
+from ..core.persistence import LastConfig
+from ..protocols import (
     CampaignClient,
     CampaignError,
     CrowbarClient,
@@ -67,10 +67,10 @@ from .protocols import (
     ProtocolError,
     ScannerClient,
 )
-from .protocols.campaign import CampaignState
-from .protocols.crowbar import CrowbarOutput, CrowbarTrigger
-from .protocols.emfi import EmfiTrigger
-from .tui_modals import (
+from ..protocols.campaign import CampaignState
+from ..protocols.crowbar import CrowbarOutput, CrowbarTrigger
+from ..protocols.emfi import EmfiTrigger
+from .modals import (
     CampaignControlModal,
     CampaignFormState,
     CrowbarControlModal,
@@ -81,8 +81,8 @@ from .tui_modals import (
     ScannerControlModal,
     ScannerFormState,
 )
-from .usb import PortDiscoveryError, cdc_for
-from .version_check import VersionMismatchError, allow_mismatch, host_version_tuple
+from ..core.usb import PortDiscoveryError, cdc_for
+from ..utils.version_check import VersionMismatchError, allow_mismatch, host_version_tuple
 
 # -----------------------------------------------------------------------------
 # Diag snapshot parser — matches the line emitted every 500 ms by

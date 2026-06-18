@@ -21,7 +21,7 @@ import struct
 from dataclasses import dataclass
 from enum import IntEnum
 
-from ..usb import cdc_for
+from ..core.usb import cdc_for
 from ._base import BinaryProtoClient, EngineError
 
 CMD_PING = 0x01

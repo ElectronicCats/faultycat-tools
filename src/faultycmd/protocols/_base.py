@@ -18,7 +18,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Protocol
 
-from ..framing import build_frame, read_frame
+from ..core.framing import build_frame, read_frame
 
 
 class _SerialLike(Protocol):
@@ -115,7 +115,7 @@ class BinaryProtoClient:
         override is on). Closes the serial port on failure so the
         caller doesn't end up holding a half-open client.
         """
-        from ..version_check import (  # noqa: PLC0415 — avoid import cycle
+        from ..utils.version_check import (  # noqa: PLC0415 — avoid import cycle
             assert_version_match,
             parse_ping_version,
         )

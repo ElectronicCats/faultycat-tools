@@ -11,7 +11,7 @@ campaign.py         F9-4 campaign_proto (CMD 0x20..0x24)  CDC0/CDC1
                     multiplexed; engine implied by CDC
 ==================  ====================================  =====
 
-Common framing primitives live in :mod:`faultycmd.framing`; the
+Common framing primitives live in :mod:`faultycmd.core.framing`; the
 shared client base in :mod:`faultycmd.protocols._base` opens the
 serial port and round-trips frames.
 

@@ -51,7 +51,7 @@ build-binary = [
 # does. With bare `main` the click group would let those bubble up as
 # Python tracebacks. The two invocation paths must stay symmetric so
 # operators get the same UX whether `faultycmd.exe` is on PATH or not.
-faultycmd = "faultycmd.cli:_wrap_main"
+faultycmd = "faultycmd.core.cli:_wrap_main"
 
 [project.urls]
 Homepage = "https://github.com/ElectronicCats/faultycat"

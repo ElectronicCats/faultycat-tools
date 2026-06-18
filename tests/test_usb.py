@@ -1,4 +1,4 @@
-"""Unit tests for faultycmd.usb — port discovery + role mapping.
+"""Unit tests for faultycmd.core.usb — port discovery + role mapping.
 
 Mocks pyserial's list_ports.comports() so tests pass on any
 platform (don't depend on a real /dev/ttyACM* or COMx).
@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from faultycmd import usb
+from faultycmd.core import usb
 
 
 @dataclass
@@ -83,7 +83,7 @@ def linux_environment(monkeypatch):
         _linux_port("/dev/ttyACM3", 0x1209, 0xFA17, 0x06),
         _linux_port("/dev/ttyACM4", 0x0403, 0x6001, 0x00),
     ]
-    monkeypatch.setattr("faultycmd.usb.list_ports.comports", lambda: ports)
+    monkeypatch.setattr("faultycmd.core.usb.list_ports.comports", lambda: ports)
     monkeypatch.setattr("shutil.which", lambda _name: None)
     return ports
 
@@ -103,7 +103,7 @@ def macos_environment(monkeypatch):
         # An unrelated USB-modem on the same Mac, NOT FaultyCat.
         _macos_port("/dev/cu.usbmodem14301", 0x2341, 0x0043),
     ]
-    monkeypatch.setattr("faultycmd.usb.list_ports.comports", lambda: ports)
+    monkeypatch.setattr("faultycmd.core.usb.list_ports.comports", lambda: ports)
     monkeypatch.setattr("shutil.which", lambda _name: None)
     return ports
 
@@ -119,7 +119,7 @@ def macos_with_iinterface_environment(monkeypatch):
         _macos_port("/dev/cu.usbmodem14205", 0x1209, 0xFA17, "FaultyCat Scanner Shell"),
         _macos_port("/dev/cu.usbmodem14207", 0x1209, 0xFA17, "FaultyCat Target UART"),
     ]
-    monkeypatch.setattr("faultycmd.usb.list_ports.comports", lambda: ports)
+    monkeypatch.setattr("faultycmd.core.usb.list_ports.comports", lambda: ports)
     monkeypatch.setattr("shutil.which", lambda _name: None)
     return ports
 
@@ -134,7 +134,7 @@ def windows_environment(monkeypatch):
         _windows_port("COM6", 0x1209, 0xFA17, 0x06),
         _windows_port("COM7", 0x10C4, 0xEA60, 0x00),  # CP2102
     ]
-    monkeypatch.setattr("faultycmd.usb.list_ports.comports", lambda: ports)
+    monkeypatch.setattr("faultycmd.core.usb.list_ports.comports", lambda: ports)
     monkeypatch.setattr("shutil.which", lambda _name: None)
     return ports
 
@@ -241,14 +241,14 @@ def test_cdc_for_unknown_role_raises(linux_environment):
 
 
 def test_cdc_for_no_match_raises(monkeypatch):
-    monkeypatch.setattr("faultycmd.usb.list_ports.comports", lambda: [])
+    monkeypatch.setattr("faultycmd.core.usb.list_ports.comports", lambda: [])
     monkeypatch.setattr("shutil.which", lambda _name: None)
     with pytest.raises(usb.PortDiscoveryError):
         usb.cdc_for("emfi")
 
 
 def test_no_devices_returns_empty(monkeypatch):
-    monkeypatch.setattr("faultycmd.usb.list_ports.comports", lambda: [])
+    monkeypatch.setattr("faultycmd.core.usb.list_ports.comports", lambda: [])
     monkeypatch.setattr("shutil.which", lambda _name: None)
     assert usb.discover() == []
 

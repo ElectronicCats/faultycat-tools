@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from faultycmd.tui_modals import (
+from faultycmd.tui.modals import (
     CampaignControlModal,
     CampaignFormState,
     CrowbarControlModal,
@@ -164,7 +164,7 @@ def test_emfi_form_trigger_strings_all_map_to_emfi_trigger_enum():
     int() with base 10: 'immediate'` — exactly the smoke regression
     that triggered the F11-0a-fix commit."""
     from faultycmd.protocols.emfi import EmfiTrigger
-    from faultycmd.tui_modals import _EMFI_TRIGGERS
+    from faultycmd.tui.modals import _EMFI_TRIGGERS
 
     for trig_str in _EMFI_TRIGGERS:
         # Must not raise — every UI string is a valid enum name.
@@ -271,7 +271,7 @@ def test_crowbar_form_strings_all_map_to_wire_enums():
     `CrowbarTrigger[s.upper()]` / `CrowbarOutput[s.upper()]` map
     that the wire-level configure() expects."""
     from faultycmd.protocols.crowbar import CrowbarOutput, CrowbarTrigger
-    from faultycmd.tui_modals import _CROWBAR_OUTPUTS, _CROWBAR_TRIGGERS
+    from faultycmd.tui.modals import _CROWBAR_OUTPUTS, _CROWBAR_TRIGGERS
 
     for trig_str in _CROWBAR_TRIGGERS:
         assert isinstance(int(CrowbarTrigger[trig_str.upper()]), int)

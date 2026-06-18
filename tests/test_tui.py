@@ -11,7 +11,7 @@ live FaultyCat instead.
 
 from __future__ import annotations
 
-from faultycmd.tui import (
+from faultycmd.tui.app import (
     CampaignPanel,
     DiagSnapshot,
     FaultycmdTUI,
@@ -137,7 +137,7 @@ def test_campaign_panel_clear_tail():
 def test_app_construction_does_not_open_serial():
     """Constructing the App must not touch any CDC — opening happens
     in on_mount once Textual is running. This keeps `import
-    faultycmd.tui` lightweight enough for headless smoke (pytest,
+    faultycmd.tui.app` lightweight enough for headless smoke (pytest,
     `faultycmd --version`, etc.) on machines without a board."""
     app = FaultycmdTUI()
     # No connections opened yet.

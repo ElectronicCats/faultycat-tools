@@ -35,7 +35,7 @@ import time
 from collections.abc import Callable, Iterable
 from typing import Protocol
 
-from ..usb import cdc_for
+from ..core.usb import cdc_for
 
 
 class _SerialLike(Protocol):
@@ -120,7 +120,7 @@ class ScannerClient:
         Firmware emits ``SHELL: VERSION X.Y.Z.W``. Closes the serial
         on failure to keep the client in a consistent state.
         """
-        from ..version_check import (  # noqa: PLC0415 — avoid import cycle
+        from ..utils.version_check import (  # noqa: PLC0415 — avoid import cycle
             assert_version_match,
             parse_shell_version,
         )

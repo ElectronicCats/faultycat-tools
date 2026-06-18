@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import Optional
 
-from ..usb import cdc_for
+from ..core.usb import cdc_for
 from ._base import BinaryProtoClient, EngineError
 
 # -- opcodes (mirror emfi_proto.h) ------------------------------------
