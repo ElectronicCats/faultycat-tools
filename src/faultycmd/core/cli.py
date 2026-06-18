@@ -147,7 +147,6 @@ def _print_status_table(title: str, rows: list[tuple[str, str]]) -> None:
 
 
 @click.group()
-@click.version_option(__version__, prog_name="faultycmd")
 @click.option(
     "--ignore-version-mismatch",
     is_flag=True,
@@ -156,7 +155,7 @@ def _print_status_table(title: str, rows: list[tuple[str, str]]) -> None:
     "Unsafe — only use for development against a hand-built UF2.",
 )
 def main(ignore_version_mismatch: bool) -> None:
-    """faultycmd — host tool for FaultyCat v3."""
+    """faultycmd: All in one FaultyCat tools environment."""
     if ignore_version_mismatch:
         set_allow_mismatch(True)
         print_warning("Firmware/host version parity check bypassed.")
