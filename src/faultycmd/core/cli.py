@@ -884,7 +884,7 @@ def uart_console(
     bridge is already running — the firmware reports `ERR busy` on a
     second `uart enter` since the pins are already owned by this same
     passthrough), then pumps bytes bidirectionally between this
-    terminal and the Target UART data CDC. Press Ctrl-] to exit; the
+    terminal and the Target UART data CDC. Press Ctrl-X to exit; the
     bridge is only disabled again on the way out if this command was
     the one that enabled it.
     """
@@ -928,7 +928,7 @@ def uart_console(
 
         data_port = target_port or cdc_for("target")
         ser = serial.Serial(data_port, baud, timeout=0.1)
-        print_info(f"Bridging {data_port} — Ctrl-] to exit")
+        print_info(f"Bridging {data_port} — Ctrl-X to exit")
 
         stop = threading.Event()
 
@@ -945,7 +945,7 @@ def uart_console(
             with _raw_terminal():
                 while True:
                     data = sys.stdin.buffer.read(1)
-                    if not data or data == b"\x1d":  # Ctrl-]
+                    if not data or data == b"\x18":  # Ctrl-X
                         break
                     ser.write(data)
         except KeyboardInterrupt:
