@@ -60,7 +60,7 @@ from ..protocols import (
 )
 from ..protocols.crowbar import CrowbarOutput, CrowbarTrigger
 from ..protocols.emfi import EmfiTrigger
-from .usb import discover
+from .usb import PortDiscoveryError, discover
 from ..utils.version_check import VersionMismatchError, set_allow_mismatch
 from ..utils.output import (
     console,
@@ -178,7 +178,6 @@ def devices() -> None:
     ports = discover()
     if not ports:
         print_warning("No FaultyCat CDC found.")
-        print_dim("Check that the board is plugged in and re-enumerated as 1209:fa17.")
         raise SystemExit(1)
     table = Table(title=f"Found {len(ports)} FaultyCat interface(s)", box=box.ROUNDED)
     table.add_column("IF", style=STYLES["device"], justify="right")
@@ -1166,6 +1165,9 @@ def _wrap_main() -> None:
     except (EngineError, CampaignError, ScannerError) as e:
         print_error(str(e))
         raise SystemExit(2) from e
+    except PortDiscoveryError:
+        print_warning("No FaultyCat CDC found.")
+        raise SystemExit(1) from None
     except FileNotFoundError as e:
         print_error(f"not found: {e}")
         raise SystemExit(2) from e
