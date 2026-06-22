@@ -443,7 +443,7 @@ class ScannerClient:
 
     def _expect_ok(self, prefix: str, cmd: str) -> str:
         line = self.send_line(cmd, accept_prefixes=(prefix,))
-        if " ERR " in f" {line} ":
+        if " ERR " in f" {line} " or " OK " not in f" {line} ":
             raise ScannerError(line)
         return line
 

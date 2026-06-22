@@ -889,6 +889,7 @@ def uart_console(
     the one that enabled it.
     """
     import contextlib
+    import select
     import threading
 
     import serial
@@ -931,23 +932,29 @@ def uart_console(
         print_info(f"Bridging {data_port} — Ctrl-X to exit")
 
         stop = threading.Event()
+        disconnect_error: list[Exception] = []
 
         def _pump_serial_to_stdout() -> None:
-            while not stop.is_set():
-                chunk = ser.read(64)
-                if chunk:
-                    sys.stdout.buffer.write(chunk)
-                    sys.stdout.buffer.flush()
+            try:
+                while not stop.is_set():
+                    chunk = ser.read(64)
+                    if chunk:
+                        sys.stdout.buffer.write(chunk)
+                        sys.stdout.buffer.flush()
+            except serial.SerialException as exc:
+                disconnect_error.append(exc)
+                stop.set()
 
         reader = threading.Thread(target=_pump_serial_to_stdout, daemon=True)
         reader.start()
         try:
             with _raw_terminal():
-                while True:
-                    data = sys.stdin.buffer.read(1)
-                    if not data or data == b"\x18":  # Ctrl-X
-                        break
-                    ser.write(data)
+                while not stop.is_set():
+                    if select.select([sys.stdin], [], [], 0.1)[0]:
+                        data = sys.stdin.buffer.read(1)
+                        if not data or data == b"\x18":  # Ctrl-X
+                            break
+                        ser.write(data)
         except KeyboardInterrupt:
             pass
         finally:
@@ -956,6 +963,10 @@ def uart_console(
             ser.close()
             if not already_enabled:
                 print_success(control.uart_exit())
+            if disconnect_error:
+                raise click.ClickException(
+                    f"Target UART disconnected: {disconnect_error[0]}"
+                )
 
 
 # -----------------------------------------------------------------------------
