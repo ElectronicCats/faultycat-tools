@@ -77,6 +77,14 @@ class VersionMismatchError(RuntimeError):
             "--ignore-version-mismatch to bypass (unsafe — wire protocol "
             "may have shifted)."
         )
+        if firmware is None:
+            msg += (
+                " This firmware build predates version embedding — likely a "
+                "beta/dev build whose CI release-versioning step hasn't run "
+                "yet. Functionality is not guaranteed against this host "
+                "version; proceed with --ignore-version-mismatch only if you "
+                "know what you're testing."
+            )
         if hint:
             msg += f" [{hint}]"
         super().__init__(msg)

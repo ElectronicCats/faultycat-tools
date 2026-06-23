@@ -15,6 +15,7 @@ Top-level command groups mirror the firmware's CDC layout:
     faultycmd crowbar   (F5 crowbar_proto on CDC1)
     faultycmd campaign  (F9-4 campaign_proto on CDC0/CDC1, --engine)
     faultycmd scanner   (F8-2 ``scan swd`` over CDC2 text shell)
+    faultycmd i2c       (I2C scan/probe over the same CDC2 text shell)
     faultycmd uart      (Target UART passthrough: CDC2 control + CDC3 data)
     faultycmd tui       (F10-5 Textual dashboard)
     faultycmd devices   (USB enumeration helper)
@@ -760,6 +761,57 @@ def scanner_scan_swd(
             timeout_s=timeout_s,
             on_progress=console.print,
         )
+
+
+# -----------------------------------------------------------------------------
+# `i2c`
+# -----------------------------------------------------------------------------
+
+
+@main.group()
+@click.option("--port", default=None, help="Override the scanner port.")
+@click.pass_context
+def i2c(ctx: click.Context, port: str | None) -> None:
+    """Scan and probe the target's I2C bus (rides the scanner CDC)."""
+    ctx.obj = port
+
+
+def _i2c_client(ctx: click.Context) -> ScannerClient:
+    port = ctx.obj
+    return ScannerClient(port) if port is not None else ScannerClient.discover()
+
+
+@i2c.command("scan")
+@click.option(
+    "--timeout-s",
+    type=float,
+    default=30.0,
+    show_default=True,
+    help="Max scan time in seconds.",
+)
+@click.pass_context
+def i2c_scan(ctx: click.Context, timeout_s: float) -> None:
+    """Detect the target's I2C SDA/SCL pins and ACKed addresses."""
+    with _i2c_client(ctx) as cli:
+        cli.scan_i2c(timeout_s=timeout_s, on_progress=console.print)
+
+
+@i2c.command("probe")
+@click.argument("sda", type=int)
+@click.argument("scl", type=int)
+@click.option(
+    "--timeout-s",
+    type=float,
+    default=5.0,
+    show_default=True,
+    help="Max probe time in seconds.",
+)
+@click.pass_context
+def i2c_probe(ctx: click.Context, sda: int, scl: int, timeout_s: float) -> None:
+    """Rescan I2C addresses on known SDA/SCL pins (skip the full sweep)."""
+    with _i2c_client(ctx) as cli:
+        for line in cli.i2c_probe(sda, scl, timeout_s=timeout_s):
+            console.print(line)
 
 
 # -----------------------------------------------------------------------------

@@ -24,7 +24,13 @@ from ._base import BinaryProtoClient, EngineError, ProtocolError
 from .campaign import CampaignClient, CampaignError, CampaignResult, CampaignStatus
 from .crowbar import CrowbarClient, CrowbarStatus
 from .emfi import EmfiClient, EmfiStatus
-from .scanner import ScannerClient, ScannerError
+from .scanner import (
+    ScannerClient,
+    ScannerError,
+    parse_i2c_probe_ok,
+    parse_scan_i2c_match,
+    parse_scan_swd_match,
+)
 
 __all__ = [
     "BinaryProtoClient",
@@ -40,4 +46,7 @@ __all__ = [
     "EmfiStatus",
     "ScannerClient",
     "ScannerError",
+    "parse_scan_swd_match",
+    "parse_scan_i2c_match",
+    "parse_i2c_probe_ok",
 ]

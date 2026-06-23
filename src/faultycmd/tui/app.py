@@ -754,9 +754,10 @@ class FaultycmdTUI(App[None]):
         threading.Thread(target=worker, daemon=True).start()
 
     def action_open_scanner_modal(self) -> None:
-        """F11-0d (reduced): opens the SWD scan modal. Only ``scan swd``
-        is exposed in this release; the JTAG / direct-SWD verbs are WIP
-        and hidden. The scan callback is wrapped in `_run_scanner_task`
+        """F11-0d (reduced): opens the SWD/I2C scan modal. ``scan swd``
+        and ``scan i2c`` are exposed in this release; the JTAG /
+        direct-SWD verbs are WIP and hidden. The scan callback is
+        wrapped in `_run_scanner_task`
         so the CDC2 diag tail is paused while the scanner shell client
         owns the port. The raw scan output (MATCH / NO_MATCH lines)
         lands in the modal status line — no follow-up auto-init prompt
@@ -777,9 +778,16 @@ class FaultycmdTUI(App[None]):
                 result_cb=_show_in_modal,
             )
 
+        def _on_scan_i2c() -> None:
+            self._run_scanner_task(
+                lambda s: s.scan_i2c(timeout_s=30.0),
+                result_cb=_show_in_modal,
+            )
+
         modal = ScannerControlModal(
             initial=initial,
             scan_swd_cb=_on_scan_swd,
+            scan_i2c_cb=_on_scan_i2c,
         )
         self.push_screen(modal)
 

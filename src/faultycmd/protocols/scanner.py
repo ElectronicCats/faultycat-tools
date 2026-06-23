@@ -75,6 +75,7 @@ ACCEPTED_PREFIXES: tuple[str, ...] = (
     "SERPROG:",
     "CAMPAIGN:",
     "UART:",
+    "I2C:",
 )
 
 
@@ -376,6 +377,24 @@ class ScannerClient:
             on_line=on_progress,
         )
 
+    def scan_i2c(
+        self,
+        timeout_s: float = 30.0,
+        on_progress: Callable[[str], None] | None = None,
+    ) -> list[str]:
+        # NB: unlike scan_swd, a MATCH here is followed by N
+        # `SCAN:   addr=0x%02X` lines — "MATCH" can't be a terminal
+        # substring (it would cut off those lines, and it's also a
+        # substring of "NO_MATCH"). Rely on the quiet-period fallback
+        # in send_line_collect to know the address list is done.
+        return self.send_line_collect(
+            "scan i2c",
+            accept_prefixes=("SCAN:",),
+            terminal_substrings=("NO_MATCH", "ERR"),
+            timeout=timeout_s,
+            on_line=on_progress,
+        )
+
     # -- Mode switches (F8-4 / F8-5) — confirmation-only -----------
 
     def buspirate_enter(
@@ -439,6 +458,34 @@ class ScannerClient:
     def uart_set_stopbits(self, stop_bits: int) -> str:
         return self._expect_ok("UART:", f"uart stopbits {stop_bits}")
 
+    # -- I2C manual probe — rescan known SDA/SCL pins without re-running
+    #    the full `scan i2c` P(8,2)=56 sweep. Replies under `I2C:`,
+    #    not `SCAN:` (see apps/faultycat_fw/main.c::cmd_i2c_probe).
+    # ---------------------------------------------------------------
+
+    def i2c_probe(
+        self,
+        sda: int,
+        scl: int,
+        timeout_s: float = 5.0,
+    ) -> list[str]:
+        """Rescan addresses on known SDA/SCL pins.
+
+        Returns every ``I2C:`` line: the summary line (``OK probe
+        ...`` / ``NO_MATCH ...`` / ``ERR ...``) followed by one
+        ``I2C:   addr=0x%02X`` line per ACKed address.
+        """
+        # Same reasoning as scan_i2c: an "OK probe" summary line is
+        # followed by N address lines, so it can't be a terminal
+        # substring without truncating them — only NO_MATCH/ERR end
+        # the reply with nothing more to collect.
+        return self.send_line_collect(
+            f"i2c probe {sda} {scl}",
+            accept_prefixes=("I2C:",),
+            terminal_substrings=("NO_MATCH", "ERR"),
+            timeout=timeout_s,
+        )
+
     # -- internals --------------------------------------------------
 
     def _expect_ok(self, prefix: str, cmd: str) -> str:
@@ -472,6 +519,57 @@ def parse_scan_swd_match(lines: Iterable[str]) -> tuple[int, int] | None:
         m = _SCAN_SWD_MATCH_RE.search(line)
         if m:
             return int(m.group("swclk")), int(m.group("swdio"))
+    return None
+
+
+# Firmware emits the I2C MATCH line as
+#     SCAN: i2c MATCH sda=GP<n> scl=GP<n> found=<n>
+# (apps/faultycat_fw/main.c::cmd_scan_i2c), followed by `found` lines
+# of `SCAN:   addr=0x<hex>`. `i2c probe` (cmd_i2c_probe) emits the
+# analogous summary under the `I2C:` prefix instead:
+#     I2C: OK probe sda=GP<n> scl=GP<n> found=<n>
+# followed by the same `I2C:   addr=0x<hex>` shape.
+_SCAN_I2C_MATCH_RE = re.compile(
+    r"\bi2c\s+MATCH\s+sda=GP(?P<sda>\d+)\s+scl=GP(?P<scl>\d+)\s+found=(?P<n>\d+)\b",
+    re.IGNORECASE,
+)
+_I2C_PROBE_OK_RE = re.compile(
+    r"\bOK\s+probe\s+sda=GP(?P<sda>\d+)\s+scl=GP(?P<scl>\d+)\s+found=(?P<n>\d+)\b",
+    re.IGNORECASE,
+)
+_I2C_ADDR_RE = re.compile(r"\baddr=0x(?P<addr>[0-9A-Fa-f]{2})\b")
+
+
+def parse_scan_i2c_match(lines: Iterable[str]) -> tuple[int, int, list[int]] | None:
+    """Return ``(sda_gp, scl_gp, addrs)`` if an I2C MATCH line is
+    present in ``scan_i2c()`` output; ``None`` if NO_MATCH / ERR /
+    unrecognised. ``addrs`` is parsed from the trailing
+    ``addr=0x..`` lines that follow the MATCH summary."""
+    lines = list(lines)
+    for i, line in enumerate(lines):
+        m = _SCAN_I2C_MATCH_RE.search(line)
+        if m:
+            addrs = [
+                int(am.group("addr"), 16)
+                for later in lines[i + 1 :]
+                if (am := _I2C_ADDR_RE.search(later))
+            ]
+            return int(m.group("sda")), int(m.group("scl")), addrs
+    return None
+
+
+def parse_i2c_probe_ok(lines: Iterable[str]) -> list[int] | None:
+    """Return the list of ACKed addresses if ``i2c_probe()`` output
+    contains an ``OK probe`` summary line; ``None`` on NO_MATCH/ERR."""
+    lines = list(lines)
+    for i, line in enumerate(lines):
+        m = _I2C_PROBE_OK_RE.search(line)
+        if m:
+            return [
+                int(am.group("addr"), 16)
+                for later in lines[i + 1 :]
+                if (am := _I2C_ADDR_RE.search(later))
+            ]
     return None
 
 
@@ -510,4 +608,6 @@ __all__ = [
     "ScannerClient",
     "ScannerError",
     "parse_scan_swd_match",
+    "parse_scan_i2c_match",
+    "parse_i2c_probe_ok",
 ]

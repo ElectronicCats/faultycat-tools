@@ -829,16 +829,19 @@ class ScannerControlModal(ModalScreen[None]):
         *,
         initial: ScannerFormState | None = None,
         scan_swd_cb=None,
+        scan_i2c_cb=None,
     ) -> None:
         super().__init__()
         self.state = initial or ScannerFormState()
         self.scan_swd_cb = scan_swd_cb
+        self.scan_i2c_cb = scan_i2c_cb
 
     def compose(self) -> ComposeResult:
         with Vertical():
-            yield Label("Scanner / SWD control")
-            yield Label("[dim]CDC2 · F8-2 scan swd[/dim]")
+            yield Label("Scanner / SWD + I2C control")
+            yield Label("[dim]CDC2 · F8-2 scan swd / scan i2c[/dim]")
             yield Label("[bold]scan swd[/bold] — bus-wide discovery (timeout 30 s)")
+            yield Label("[bold]scan i2c[/bold] — bus-wide discovery (timeout 30 s)")
             yield Label(
                 "[dim]JTAG and direct-SWD verbs are WIP and hidden in "
                 "this release.[/dim]"
@@ -846,6 +849,7 @@ class ScannerControlModal(ModalScreen[None]):
             yield Static("", id="status_line")
             with Horizontal():
                 yield Button("Scan SWD", id="apply_scan_swd", variant="primary")
+                yield Button("Scan I2C", id="apply_scan_i2c", variant="primary")
                 yield Button("Close", id="close")
 
     def _set_status(self, msg: str) -> None:
@@ -867,6 +871,14 @@ class ScannerControlModal(ModalScreen[None]):
                 self._set_status("scan-swd dispatched…")
             except Exception as e:
                 self._set_status(f"scan-swd: {e}")
+        elif bid == "apply_scan_i2c":
+            if self.scan_i2c_cb is None:
+                return
+            try:
+                self.scan_i2c_cb()
+                self._set_status("scan-i2c dispatched…")
+            except Exception as e:
+                self._set_status(f"scan-i2c: {e}")
 
     def action_close(self) -> None:
         self.dismiss(None)
