@@ -5,7 +5,11 @@ from __future__ import annotations
 import pytest
 
 from faultycmd.protocols import ScannerClient, ScannerError
-from faultycmd.protocols.scanner import parse_scan_swd_match
+from faultycmd.protocols.scanner import (
+    parse_i2c_probe_ok,
+    parse_scan_i2c_match,
+    parse_scan_swd_match,
+)
 
 
 class FakeShellSerial:
@@ -186,6 +190,54 @@ def test_scan_swd_with_targetsel():
     assert b"scan swd 01002927\r\n" in bytes(fake.written)
 
 
+def test_scan_i2c_collects_addr_lines_after_match():
+    fake = FakeShellSerial()
+    fake.queue_lines(
+        "SCAN: starting I2C pinout scan over 8 channels (P(8,2)=56)",
+        "SCAN: progress 0/56",
+        "ADC= 750 SCAN=11111111",  # diag noise interleaved
+        "SCAN: i2c MATCH sda=GP0 scl=GP1 found=2",
+        "SCAN:   addr=0x3C",
+        "SCAN:   addr=0x50",
+    )
+    with _client(fake) as cli:
+        lines = cli.scan_i2c(timeout_s=2.0)
+    assert any("MATCH" in line for line in lines)
+    assert sum("addr=" in line for line in lines) == 2
+
+
+def test_scan_i2c_no_match():
+    fake = FakeShellSerial()
+    fake.queue_lines(
+        "SCAN: starting I2C pinout scan over 8 channels (P(8,2)=56)",
+        "SCAN: i2c NO_MATCH (no ACKed address found)",
+    )
+    with _client(fake) as cli:
+        lines = cli.scan_i2c(timeout_s=2.0)
+    assert any("NO_MATCH" in line for line in lines)
+
+
+def test_i2c_probe_collects_addr_lines():
+    fake = FakeShellSerial()
+    fake.queue_lines(
+        "I2C: OK probe sda=GP0 scl=GP1 found=1",
+        "I2C:   addr=0x3C",
+    )
+    with _client(fake) as cli:
+        lines = cli.i2c_probe(0, 1, timeout_s=2.0)
+    assert b"i2c probe 0 1\r\n" in bytes(fake.written)
+    assert any("OK probe" in line for line in lines)
+    assert any("addr=0x3C" in line for line in lines)
+
+
+def test_i2c_probe_no_match():
+    fake = FakeShellSerial()
+    fake.queue_lines("I2C: NO_MATCH sda=GP0 scl=GP1 (no ACKed address)")
+    with _client(fake) as cli:
+        lines = cli.i2c_probe(0, 1, timeout_s=2.0)
+    assert any("NO_MATCH" in line for line in lines)
+
+
 # -- mode switches ------------------------------------------------
 
 
@@ -258,3 +310,39 @@ def test_parse_scan_swd_match_accepts_split_text_block():
         "SCAN:   dpidr=0x0BC12477 targetsel_compat=0x01002927"
     )
     assert parse_scan_swd_match(blob.split("\n")) == (0, 1)
+
+
+# -- parse_scan_i2c_match / parse_i2c_probe_ok ---------------------
+
+
+def test_parse_scan_i2c_match_picks_pins_and_addrs():
+    lines = [
+        "SCAN: starting I2C pinout scan over 8 channels (P(8,2)=56)",
+        "SCAN: progress 12/56",
+        "SCAN: i2c MATCH sda=GP0 scl=GP1 found=2",
+        "SCAN:   addr=0x3C",
+        "SCAN:   addr=0x50",
+    ]
+    assert parse_scan_i2c_match(lines) == (0, 1, [0x3C, 0x50])
+
+
+def test_parse_scan_i2c_match_returns_none_on_no_match():
+    lines = [
+        "SCAN: starting I2C pinout scan over 8 channels (P(8,2)=56)",
+        "SCAN: i2c NO_MATCH (no ACKed address found)",
+    ]
+    assert parse_scan_i2c_match(lines) is None
+
+
+def test_parse_i2c_probe_ok_returns_addrs():
+    lines = [
+        "I2C: OK probe sda=GP0 scl=GP1 found=2",
+        "I2C:   addr=0x3C",
+        "I2C:   addr=0x50",
+    ]
+    assert parse_i2c_probe_ok(lines) == [0x3C, 0x50]
+
+
+def test_parse_i2c_probe_ok_returns_none_on_no_match():
+    lines = ["I2C: NO_MATCH sda=GP0 scl=GP1 (no ACKed address)"]
+    assert parse_i2c_probe_ok(lines) is None
