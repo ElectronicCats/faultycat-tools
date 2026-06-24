@@ -26,6 +26,24 @@ class I2cEvent:
     value: int | None = None
 
 
+def _debounce(bits: list[int]) -> list[int]:
+    """Drop isolated single-sample spikes (electrical noise/ringing).
+
+    A sample that differs from both its neighbors, while those
+    neighbors agree with each other, is a one-sample blip rather than
+    a real level change — replace it with the surrounding level.
+    Doesn't shift timestamps; a real transition that holds for >=2
+    samples is untouched.
+    """
+    if len(bits) < 3:
+        return list(bits)
+    out = list(bits)
+    for i in range(1, len(bits) - 1):
+        if bits[i] != bits[i - 1] and bits[i - 1] == bits[i + 1]:
+            out[i] = bits[i - 1]
+    return out
+
+
 def decode_i2c(samples: bytes, interval_us: float) -> list[I2cEvent]:
     """Decode a raw SDA/SCL trace into I2C bus events.
 
@@ -38,21 +56,28 @@ def decode_i2c(samples: bytes, interval_us: float) -> list[I2cEvent]:
     Bit sampling only happens between a START and the matching STOP —
     edges outside that window are ignored (idle bus / partial frame
     at the start of the capture).
+
+    SDA/SCL are first run through :func:`_debounce` — at a few µs per
+    sample, a single noisy sample (ringing, EMI from the same board's
+    fault-injection hardware) reads as a real edge and the state
+    machine otherwise reports phantom back-to-back START/STOP pairs.
     """
     events: list[I2cEvent] = []
     if not samples:
         return events
 
+    sda_bits = _debounce([s & _SDA_MASK for s in samples])
+    scl_bits = _debounce([(s & _SCL_MASK) >> 1 for s in samples])
+
     in_frame = False
     bit_count = 0
     shift = 0
-    prev_sda = samples[0] & _SDA_MASK
-    prev_scl = (samples[0] & _SCL_MASK) >> 1
+    prev_sda = sda_bits[0]
+    prev_scl = scl_bits[0]
 
     for i in range(1, len(samples)):
-        sample = samples[i]
-        sda = sample & _SDA_MASK
-        scl = (sample & _SCL_MASK) >> 1
+        sda = sda_bits[i]
+        scl = scl_bits[i]
         t_us = i * interval_us
 
         if scl == 1 and prev_scl == 1 and sda != prev_sda:

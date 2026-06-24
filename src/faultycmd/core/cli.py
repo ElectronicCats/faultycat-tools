@@ -890,6 +890,31 @@ def i2c_la(
         console.print(table)
 
 
+@i2c.command("la-sump-arm")
+@click.argument("sda", type=int)
+@click.argument("scl", type=int)
+@click.pass_context
+def i2c_la_sump_arm(ctx: click.Context, sda: int, scl: int) -> None:
+    """Arm the firmware's SUMP/OLS mode for a live PulseView capture.
+
+    Sends `i2c la sump enter` and disconnects immediately — the
+    firmware then speaks the classic SUMP serial protocol on this same
+    port until the host drops DTR, which sigrok's stock "Openbench
+    Logic Sniffer" (ols) driver expects with no further setup. Open
+    PulseView/sigrok-cli on this same port right away: if anything
+    else touches the line first and drops DTR, the firmware reverts to
+    the text shell and this command must be run again.
+    """
+    with _i2c_client(ctx) as cli:
+        reply = cli.i2c_la_sump_arm(sda, scl)
+    print_success(reply)
+    print_warning(
+        "Open PulseView/sigrok-cli on this port NOW (driver: Openbench Logic "
+        "Sniffer / ols) — closing or reopening the port before that drops "
+        "DTR and reverts the firmware to the text shell."
+    )
+
+
 # -----------------------------------------------------------------------------
 # `uart` (Target UART passthrough)
 #
@@ -1310,6 +1335,26 @@ def _wrap_main() -> None:
     except FileNotFoundError as e:
         print_error(f"not found: {e}")
         raise SystemExit(2) from e
+    except TimeoutError as e:
+        # Covers both the "no shell reply" and the partial-transfer
+        # timeouts (e.g. ScannerClient.i2c_la) — their messages already
+        # carry actionable hints, so just surface them as-is.
+        print_error(str(e))
+        raise SystemExit(2) from e
+    except ValueError as e:
+        # Parameter/range validation from the protocol layer (e.g.
+        # EmfiClient.capture bounds, usb.cdc_for unknown role).
+        print_error(str(e))
+        raise SystemExit(2) from e
+    except OSError as e:
+        # Covers serial.SerialException (it subclasses OSError) for
+        # things like the device being unplugged mid-command or the
+        # port already being held open by another process.
+        print_error(f"device communication error: {e}")
+        raise SystemExit(2) from e
+    except KeyboardInterrupt:
+        print_dim("Aborted by user.")
+        raise SystemExit(130) from None
 
 
 if __name__ == "__main__":

@@ -58,6 +58,25 @@ class _SerialLike(Protocol):
 SerialFactory = Callable[[str, int, float], _SerialLike]
 
 
+def _disable_hupcl(ser: _SerialLike | None) -> None:
+    """Clear HUPCL on ``ser``'s fd so closing it won't drop DTR.
+
+    Only meaningful on POSIX (termios); a no-op on Windows or for any
+    fake/non-fd serial stand-in used in tests.
+    """
+    if ser is None:
+        return
+    try:
+        import termios  # noqa: PLC0415 — POSIX-only, absent on Windows
+
+        fd = ser.fileno()  # type: ignore[attr-defined]
+        attrs = termios.tcgetattr(fd)
+        attrs[2] &= ~termios.HUPCL
+        termios.tcsetattr(fd, termios.TCSANOW, attrs)
+    except (ImportError, AttributeError, OSError):
+        pass
+
+
 def _default_serial_factory(
     port: str, baud: int, per_byte_timeout: float
 ) -> _SerialLike:
@@ -519,7 +538,7 @@ class ScannerClient:
         prefix (see module docstring / firmware
         ``main.c::cmd_i2c_la``). ``send_line``/``send_line_collect``
         would silently drop those hex lines, so this reads the raw
-        stream itself once ``samples=`` from the summary tells it
+        stream itself once ``stream n=`` from the summary tells it
         exactly how many hex characters to expect — a deterministic
         stop condition, unlike the quiet-period heuristic used for
         variable-length replies like ``scan_i2c``.
@@ -528,7 +547,8 @@ class ScannerClient:
         ser = self._require_serial()
         ser.reset_input_buffer()
         ser.write(f"i2c la {sda} {scl} {interval_us} {max_samples}\r\n".encode())
-        deadline = time.time() + timeout_s
+        start = time.time()
+        deadline = start + timeout_s
 
         buf = ""
         summary_line: str | None = None
@@ -546,7 +566,10 @@ class ScannerClient:
             if summary_line is not None:
                 break
         if summary_line is None:
-            raise TimeoutError(f"no I2C: summary for {sda=} {scl=} i2c la")
+            raise TimeoutError(
+                f"i2c la sda=GP{sda} scl=GP{scl}: no I2C: summary line within "
+                f"{timeout_s:.1f}s (device unresponsive or wrong pins?)"
+            )
         if " ERR " in f" {summary_line} ":
             raise ScannerError(summary_line)
 
@@ -560,16 +583,33 @@ class ScannerClient:
 
         needed = n_samples * 2
         hex_chars = [c for c in buf if c in _HEX_DIGITS]
-        while len(hex_chars) < needed and time.time() < deadline:
+        truncated = "TRUNC" in buf
+        while len(hex_chars) < needed and not truncated and time.time() < deadline:
             chunk = ser.read(64)
             if not chunk:
                 continue
-            hex_chars.extend(
-                c for c in chunk.decode(errors="replace") if c in _HEX_DIGITS
-            )
+            text = chunk.decode(errors="replace")
+            if "TRUNC" in text:
+                truncated = True
+            hex_chars.extend(c for c in text if c in _HEX_DIGITS)
         if len(hex_chars) < needed:
+            got = len(hex_chars)
+            elapsed = time.time() - start
+            pct = 100.0 * got / needed
+            if truncated:
+                raise ScannerError(
+                    f"i2c la sda=GP{sda} scl=GP{scl}: firmware promised "
+                    f"{n_samples} samples ({needed} hex chars) but gave up "
+                    f"after sending only {got} ({pct:.0f}%) — the host wasn't "
+                    "draining the USB CDC buffer fast enough; retry or try "
+                    "fewer --samples"
+                )
             raise TimeoutError(
-                f"i2c la: expected {needed} hex chars, got {len(hex_chars)}"
+                f"i2c la sda=GP{sda} scl=GP{scl}: firmware promised "
+                f"{n_samples} samples ({needed} hex chars) but only {got} "
+                f"({pct:.0f}%) arrived in {elapsed:.1f}s of {timeout_s:.1f}s "
+                "budget — hexdump transfer stalled or was truncated; retry, "
+                "try fewer --samples, or increase --timeout-s"
             )
         samples = bytes.fromhex("".join(hex_chars[:needed]))
         return I2cLaCapture(
@@ -578,6 +618,31 @@ class ScannerClient:
             interval_us=reply_interval_us,
             samples=samples,
         )
+
+    def i2c_la_sump_arm(self, sda: int, scl: int) -> str:
+        """Arm the firmware's SUMP/OLS mode on ``sda``/``scl`` for a
+        PulseView/sigrok ("ols" driver) capture.
+
+        Unlike every other command on this client, the caller is
+        expected to close this connection (the ``with`` block) right
+        after this returns — once armed, every byte on this CDC is
+        owned by the binary SUMP parser until the host drops DTR (see
+        ``main.c::sump_on_exit_cb`` / docs/I2C_LA_DMA_TIMER_PLAN.md
+        §6), so PulseView/sigrok-cli must open the *same* port next,
+        before that happens. There is no in-band way back to the text
+        shell from this client.
+
+        That close must NOT itself drop DTR, or the firmware reverts
+        to the text shell before PulseView gets a chance to connect —
+        pyserial's default termios has HUPCL set, so closing this fd
+        (here or implicitly when the host process exits) would lower
+        DTR immediately, losing the race every time. Clear HUPCL on
+        the fd before returning so DTR stays asserted across the
+        close.
+        """
+        reply = self._expect_ok("I2C:", f"i2c la sump enter {sda} {scl}")
+        _disable_hupcl(self._ser)
+        return reply
 
     # -- internals --------------------------------------------------
 
@@ -633,9 +698,9 @@ _I2C_PROBE_OK_RE = re.compile(
 _I2C_ADDR_RE = re.compile(r"\baddr=0x(?P<addr>[0-9A-Fa-f]{2})\b")
 
 # `i2c la` summary line (apps/faultycat_fw/main.c::cmd_i2c_la):
-#     I2C: LA OK sda=GP<n> scl=GP<n> samples=<n> interval_us=<n>
+#     I2C: LA OK sda=GP<n> scl=GP<n> stream n=<n> interval_us=<n>
 _I2C_LA_OK_RE = re.compile(
-    r"\bsda=GP(?P<sda>\d+)\s+scl=GP(?P<scl>\d+)\s+samples=(?P<samples>\d+)"
+    r"\bsda=GP(?P<sda>\d+)\s+scl=GP(?P<scl>\d+)\s+stream\s+n=(?P<samples>\d+)"
     r"\s+interval_us=(?P<interval_us>\d+)\b",
     re.IGNORECASE,
 )
