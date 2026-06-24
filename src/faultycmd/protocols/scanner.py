@@ -42,6 +42,7 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import Protocol
 
 from ..core.usb import cdc_for
@@ -87,6 +88,22 @@ class ScannerError(Exception):
     def __init__(self, line: str) -> None:
         self.line = line
         super().__init__(line)
+
+
+@dataclass
+class I2cLaCapture:
+    """Raw logic-analyzer capture from ``i2c la``.
+
+    ``samples`` is one byte per sample, bit0=SDA bit1=SCL (1=high,
+    0=low); there's no per-sample timestamp — sample ``i`` occurred
+    at ``i * interval_us``. See
+    ``faultycat-firmware/services/i2c_core/i2c_la.h``.
+    """
+
+    sda_gp: int
+    scl_gp: int
+    interval_us: int
+    samples: bytes
 
 
 class ScannerClient:
@@ -486,6 +503,82 @@ class ScannerClient:
             timeout=timeout_s,
         )
 
+    def i2c_la(
+        self,
+        sda: int,
+        scl: int,
+        interval_us: int,
+        max_samples: int,
+        timeout_s: float = 10.0,
+    ) -> I2cLaCapture:
+        """Capture a raw SDA/SCL trace via the firmware logic analyzer.
+
+        Unlike every other command on this client, the reply has two
+        parts: one ``I2C:`` summary line (filtered the usual way),
+        then a hexdump of the samples emitted *without* the ``I2C:``
+        prefix (see module docstring / firmware
+        ``main.c::cmd_i2c_la``). ``send_line``/``send_line_collect``
+        would silently drop those hex lines, so this reads the raw
+        stream itself once ``samples=`` from the summary tells it
+        exactly how many hex characters to expect — a deterministic
+        stop condition, unlike the quiet-period heuristic used for
+        variable-length replies like ``scan_i2c``.
+        """
+        max_samples = min(max_samples, 8192)
+        ser = self._require_serial()
+        ser.reset_input_buffer()
+        ser.write(f"i2c la {sda} {scl} {interval_us} {max_samples}\r\n".encode())
+        deadline = time.time() + timeout_s
+
+        buf = ""
+        summary_line: str | None = None
+        while time.time() < deadline:
+            chunk = ser.read(64)
+            if not chunk:
+                continue
+            buf += chunk.decode(errors="replace")
+            while "\n" in buf:
+                line_text, _, buf = buf.partition("\n")
+                stripped = line_text.strip()
+                if stripped.startswith("I2C:"):
+                    summary_line = stripped
+                    break
+            if summary_line is not None:
+                break
+        if summary_line is None:
+            raise TimeoutError(f"no I2C: summary for {sda=} {scl=} i2c la")
+        if " ERR " in f" {summary_line} ":
+            raise ScannerError(summary_line)
+
+        m = _I2C_LA_OK_RE.search(summary_line)
+        if m is None:
+            raise ScannerError(summary_line)
+        sda_gp = int(m.group("sda"))
+        scl_gp = int(m.group("scl"))
+        n_samples = int(m.group("samples"))
+        reply_interval_us = int(m.group("interval_us"))
+
+        needed = n_samples * 2
+        hex_chars = [c for c in buf if c in _HEX_DIGITS]
+        while len(hex_chars) < needed and time.time() < deadline:
+            chunk = ser.read(64)
+            if not chunk:
+                continue
+            hex_chars.extend(
+                c for c in chunk.decode(errors="replace") if c in _HEX_DIGITS
+            )
+        if len(hex_chars) < needed:
+            raise TimeoutError(
+                f"i2c la: expected {needed} hex chars, got {len(hex_chars)}"
+            )
+        samples = bytes.fromhex("".join(hex_chars[:needed]))
+        return I2cLaCapture(
+            sda_gp=sda_gp,
+            scl_gp=scl_gp,
+            interval_us=reply_interval_us,
+            samples=samples,
+        )
+
     # -- internals --------------------------------------------------
 
     def _expect_ok(self, prefix: str, cmd: str) -> str:
@@ -538,6 +631,15 @@ _I2C_PROBE_OK_RE = re.compile(
     re.IGNORECASE,
 )
 _I2C_ADDR_RE = re.compile(r"\baddr=0x(?P<addr>[0-9A-Fa-f]{2})\b")
+
+# `i2c la` summary line (apps/faultycat_fw/main.c::cmd_i2c_la):
+#     I2C: LA OK sda=GP<n> scl=GP<n> samples=<n> interval_us=<n>
+_I2C_LA_OK_RE = re.compile(
+    r"\bsda=GP(?P<sda>\d+)\s+scl=GP(?P<scl>\d+)\s+samples=(?P<samples>\d+)"
+    r"\s+interval_us=(?P<interval_us>\d+)\b",
+    re.IGNORECASE,
+)
+_HEX_DIGITS = "0123456789abcdefABCDEF"
 
 
 def parse_scan_i2c_match(lines: Iterable[str]) -> tuple[int, int, list[int]] | None:
@@ -605,6 +707,7 @@ def _parse_int_after(line: str, marker: str) -> int | None:
 
 __all__ = [
     "ACCEPTED_PREFIXES",
+    "I2cLaCapture",
     "ScannerClient",
     "ScannerError",
     "parse_scan_swd_match",
