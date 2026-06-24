@@ -238,6 +238,68 @@ def test_i2c_probe_no_match():
     assert any("NO_MATCH" in line for line in lines)
 
 
+def test_i2c_la_parses_summary_and_hexdump():
+    fake = FakeShellSerial()
+    # 4 samples -> 8 hex chars, wrapped across lines without I2C: prefix.
+    fake.queue_lines(
+        "I2C: LA OK sda=GP0 scl=GP1 stream n=4 interval_us=2",
+        "01 02",
+        "03 00",
+    )
+    with _client(fake) as cli:
+        cap = cli.i2c_la(0, 1, 2, 4, timeout_s=2.0)
+    assert b"i2c la 0 1 2 4\r\n" in bytes(fake.written)
+    assert cap.sda_gp == 0
+    assert cap.scl_gp == 1
+    assert cap.interval_us == 2
+    assert cap.samples == bytes.fromhex("01020300")
+
+
+def test_i2c_la_clamps_max_samples():
+    fake = FakeShellSerial()
+    fake.queue_lines(
+        "I2C: LA OK sda=GP0 scl=GP1 stream n=0 interval_us=2",
+        "",
+    )
+    with _client(fake) as cli:
+        cli.i2c_la(0, 1, 2, 999999, timeout_s=2.0)
+    assert b"i2c la 0 1 2 8192\r\n" in bytes(fake.written)
+
+
+def test_i2c_la_err_raises():
+    fake = FakeShellSerial()
+    fake.queue_lines("I2C: ERR bad_pins")
+    with _client(fake) as cli, pytest.raises(ScannerError) as ei:
+        cli.i2c_la(0, 1, 2, 4, timeout_s=2.0)
+    assert "bad_pins" in ei.value.line
+
+
+def test_i2c_la_timeout_waiting_for_hex():
+    fake = FakeShellSerial()
+    fake.queue_lines(
+        "I2C: LA OK sda=GP0 scl=GP1 stream n=4 interval_us=2",
+        "01",  # only 2 of the 8 expected hex chars arrive
+    )
+    with _client(fake) as cli, pytest.raises(TimeoutError):
+        cli.i2c_la(0, 1, 2, 4, timeout_s=0.2)
+
+
+def test_i2c_la_sump_arm_sends_enter_and_returns_ok():
+    fake = FakeShellSerial()
+    fake.queue_lines("I2C: OK entering SUMP mode sda=GP2 scl=GP3")
+    with _client(fake) as cli:
+        reply = cli.i2c_la_sump_arm(2, 3)
+    assert b"i2c la sump enter 2 3\r\n" in bytes(fake.written)
+    assert "OK entering SUMP mode" in reply
+
+
+def test_i2c_la_sump_arm_err_raises():
+    fake = FakeShellSerial()
+    fake.queue_lines("I2C: ERR bus_busy (held by another service)")
+    with _client(fake) as cli, pytest.raises(ScannerError):
+        cli.i2c_la_sump_arm(2, 3)
+
+
 # -- mode switches ------------------------------------------------
 
 
