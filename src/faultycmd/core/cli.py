@@ -61,6 +61,7 @@ from ..protocols import (
 )
 from ..protocols.crowbar import CrowbarOutput, CrowbarTrigger
 from ..protocols.emfi import EmfiTrigger
+from ..protocols.i2c_decode import decode_i2c, samples_to_vcd
 from .usb import PortDiscoveryError, discover
 from ..utils.version_check import VersionMismatchError, set_allow_mismatch
 from ..utils.output import (
@@ -812,6 +813,81 @@ def i2c_probe(ctx: click.Context, sda: int, scl: int, timeout_s: float) -> None:
     with _i2c_client(ctx) as cli:
         for line in cli.i2c_probe(sda, scl, timeout_s=timeout_s):
             console.print(line)
+
+
+@i2c.command("la")
+@click.argument("sda", type=int)
+@click.argument("scl", type=int)
+@click.option(
+    "--interval-us",
+    type=int,
+    default=2,
+    show_default=True,
+    help="Sample interval in microseconds.",
+)
+@click.option(
+    "--samples",
+    "n",
+    type=int,
+    default=2048,
+    show_default=True,
+    help="Max samples to capture (clamped to 8192, the firmware buffer size).",
+)
+@click.option(
+    "--decode/--no-decode",
+    default=True,
+    show_default=True,
+    help="Decode the capture into START/STOP/BYTE/ACK/NACK events.",
+)
+@click.option(
+    "--vcd",
+    "vcd_path",
+    type=click.Path(dir_okay=False, writable=True),
+    default=None,
+    help="Export the raw capture to a VCD file (GTKWave/PulseView/sigrok).",
+)
+@click.option(
+    "--timeout-s",
+    type=float,
+    default=10.0,
+    show_default=True,
+    help="Max capture time in seconds.",
+)
+@click.pass_context
+def i2c_la(
+    ctx: click.Context,
+    sda: int,
+    scl: int,
+    interval_us: int,
+    n: int,
+    decode: bool,
+    vcd_path: str | None,
+    timeout_s: float,
+) -> None:
+    """Capture a raw SDA/SCL trace with the firmware logic analyzer."""
+    with _i2c_client(ctx) as cli:
+        cap = cli.i2c_la(sda, scl, interval_us, n, timeout_s=timeout_s)
+    print_success(
+        f"{len(cap.samples)} samples @ {cap.interval_us}us "
+        f"(sda=GP{cap.sda_gp} scl=GP{cap.scl_gp})"
+    )
+
+    if vcd_path:
+        Path(vcd_path).write_text(
+            samples_to_vcd(cap.samples, cap.interval_us, cap.sda_gp, cap.scl_gp)
+        )
+        print_success(f"VCD written -> {vcd_path}")
+
+    if decode:
+        events = decode_i2c(cap.samples, cap.interval_us)
+        table = Table(title=f"I2C events ({len(events)})", box=box.ROUNDED)
+        table.add_column("t_us", justify="right")
+        table.add_column("kind", style=STYLES["device"])
+        table.add_column("value", justify="right")
+        for event in events:
+            value = "" if event.value is None else f"0x{event.value:02x}"
+            table.add_row(f"{event.t_us:.1f}", event.kind, value)
+        console.print(table)
 
 
 # -----------------------------------------------------------------------------
