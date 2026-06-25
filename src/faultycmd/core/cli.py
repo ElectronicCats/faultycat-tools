@@ -1351,8 +1351,14 @@ def setup_env() -> None:
 def _wrap_main() -> None:
     """Top-level wrapper that converts our protocol exceptions into
     user-friendly click messages."""
-    module = next((a for a in sys.argv[1:] if not a.startswith("-")), None)
-    print_header(module)
+    # Skip the ASCII header when click is asked to emit a shell
+    # completion script (_FAULTYCMD_COMPLETE) — `completion install`
+    # captures stdout and writes it verbatim to the completion file, so
+    # any extra output before the script corrupts it (e.g. the zsh
+    # `#compdef` line must be the first line).
+    if not os.environ.get("_FAULTYCMD_COMPLETE"):
+        module = next((a for a in sys.argv[1:] if not a.startswith("-")), None)
+        print_header(module)
     try:
         main()
     except VersionMismatchError as e:
