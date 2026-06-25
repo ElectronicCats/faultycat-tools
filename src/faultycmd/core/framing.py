@@ -27,7 +27,6 @@ from typing import Protocol
 SOF = 0xFA
 HEADER_LEN = 3  # CMD + LEN_LO + LEN_HI
 CRC_LEN = 2
-FRAME_OVERHEAD = 1 + HEADER_LEN + CRC_LEN  # SOF + header + CRC = 6
 
 
 class _ByteReader(Protocol):
