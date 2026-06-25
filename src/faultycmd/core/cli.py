@@ -893,26 +893,58 @@ def i2c_la(
 @i2c.command("la-sump-arm")
 @click.argument("sda", type=int)
 @click.argument("scl", type=int)
+@click.option(
+    "--pulseview/--no-pulseview",
+    "open_pulseview",
+    default=True,
+    help="Launch PulseView on this port after arming (default: on).",
+)
 @click.pass_context
-def i2c_la_sump_arm(ctx: click.Context, sda: int, scl: int) -> None:
+def i2c_la_sump_arm(
+    ctx: click.Context, sda: int, scl: int, open_pulseview: bool
+) -> None:
     """Arm the firmware's SUMP/OLS mode for a live PulseView capture.
 
     Sends `i2c la sump enter` and disconnects immediately — the
     firmware then speaks the classic SUMP serial protocol on this same
     port until the host drops DTR, which sigrok's stock "Openbench
-    Logic Sniffer" (ols) driver expects with no further setup. Open
-    PulseView/sigrok-cli on this same port right away: if anything
+    Logic Sniffer" (ols) driver expects with no further setup. By
+    default this also launches PulseView on this same port right away;
+    pass --no-pulseview to skip that and open it yourself. If anything
     else touches the line first and drops DTR, the firmware reverts to
     the text shell and this command must be run again.
     """
     with _i2c_client(ctx) as cli:
         reply = cli.i2c_la_sump_arm(sda, scl)
+        port = cli.port
     print_success(reply)
-    print_warning(
-        "Open PulseView/sigrok-cli on this port NOW (driver: Openbench Logic "
-        "Sniffer / ols) — closing or reopening the port before that drops "
-        "DTR and reverts the firmware to the text shell."
+
+    if not open_pulseview:
+        print_warning(
+            "Open PulseView/sigrok-cli on this port NOW (driver: Openbench "
+            "Logic Sniffer / ols) — closing or reopening the port before "
+            "that drops DTR and reverts the firmware to the text shell."
+        )
+        return
+
+    import shutil
+
+    pulseview_bin = shutil.which("pulseview")
+    if pulseview_bin is None:
+        print_warning(
+            "PulseView not found on PATH — open it manually NOW (driver: "
+            "Openbench Logic Sniffer / ols, port: "
+            f"{port}) before anything else touches this port."
+        )
+        return
+
+    subprocess.Popen(
+        [pulseview_bin, "-d", f"ols:conn={port}"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
     )
+    print_success(f"PulseView launched on {port} (driver: ols)")
 
 
 # -----------------------------------------------------------------------------

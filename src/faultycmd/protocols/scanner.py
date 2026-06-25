@@ -168,6 +168,12 @@ class ScannerClient:
 
         Firmware emits ``SHELL: VERSION X.Y.Z.W``. Closes the serial
         on failure to keep the client in a consistent state.
+
+        A timeout here usually means the firmware is still parked in
+        the binary SUMP shell from a previous ``i2c la sump enter``
+        whose DTR was never dropped (e.g. PulseView never connected).
+        One DTR drop+reassert is the only thing that kicks it back to
+        the text shell, so try that once before giving up.
         """
         from ..utils.version_check import (  # noqa: PLC0415 — avoid import cycle
             assert_version_match,
@@ -175,7 +181,12 @@ class ScannerClient:
         )
 
         try:
-            line = self.send_line("version", accept_prefixes=("SHELL:",))
+            try:
+                line = self.send_line("version", accept_prefixes=("SHELL:",))
+            except TimeoutError:
+                if not self._toggle_dtr():
+                    raise
+                line = self.send_line("version", accept_prefixes=("SHELL:",))
             self.firmware_version = parse_shell_version(line)
             assert_version_match(self.firmware_version)
         except Exception:
@@ -183,6 +194,22 @@ class ScannerClient:
                 self._ser.close()
                 self._ser = None
             raise
+
+    def _toggle_dtr(self) -> bool:
+        """Drop then reassert DTR on the open serial handle.
+
+        Returns False if the underlying serial stand-in doesn't
+        support ``.dtr`` (e.g. test fakes), so the caller can fall
+        back to raising the original error.
+        """
+        ser = self._ser
+        if ser is None or not hasattr(ser, "dtr"):
+            return False
+        ser.dtr = False  # type: ignore[attr-defined]
+        time.sleep(0.1)
+        ser.dtr = True  # type: ignore[attr-defined]
+        time.sleep(0.3)
+        return True
 
     def close(self) -> None:
         if self._ser is not None:
