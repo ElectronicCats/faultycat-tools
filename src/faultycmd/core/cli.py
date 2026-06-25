@@ -927,19 +927,19 @@ def i2c_la_sump_arm(
         )
         return
 
-    import shutil
+    from .pipes import get_pulseview_path
 
-    pulseview_bin = shutil.which("pulseview")
-    if pulseview_bin is None:
+    pulseview_path = get_pulseview_path()
+    if pulseview_path is None:
         print_warning(
-            "PulseView not found on PATH — open it manually NOW (driver: "
+            "PulseView not found — open it manually NOW (driver: "
             "Openbench Logic Sniffer / ols, port: "
             f"{port}) before anything else touches this port."
         )
         return
 
     subprocess.Popen(
-        [pulseview_bin, "-d", f"ols:conn={port}"],
+        [str(pulseview_path), "-d", f"ols:conn={port}"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
