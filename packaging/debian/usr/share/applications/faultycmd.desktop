@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=FaultyCat
+Comment=Host CLI/TUI for FaultyCat v3 — EMFI / crowbar / SWD / JTAG fault injection
+Exec=faultycmd tui
+Icon=faultycmd
+Terminal=true
+Type=Application
+Categories=Development;Security
