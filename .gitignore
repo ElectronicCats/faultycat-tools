@@ -23,5 +23,11 @@ env/
 .coverage
 htmlcov/
 
-# PyInstaller
-*.spec
+# Packaging artifacts (built by .github/workflows/build-*.yml)
+*.deb
+*.pkg
+*.pkg.tar.zst
+*.exe
+build_deb/
+build_arch/
+pkg_root/

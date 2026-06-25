@@ -1,0 +1,64 @@
+name: Build macOS Installer
+
+on:
+  push:
+    branches:
+      - main
+  release:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag to upload assets to (ex: v3.0.0.5)'
+        required: true
+        default: 'v3.0.0.5'
+
+jobs:
+  build-mac:
+    strategy:
+      matrix:
+        include:
+          - os: macos-15-intel
+            arch: x86_64
+          - os: macos-latest
+            arch: arm64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build macOS Package
+        run: |
+          chmod +x build_mac.sh
+          ./build_mac.sh
+
+      - name: Rename and Verify Binary
+        run: |
+          PKG_FILE=$(ls *.pkg | head -n 1)
+          NEW_NAME="${PKG_FILE%.pkg}-${{ matrix.arch }}.pkg"
+          mv "$PKG_FILE" "$NEW_NAME"
+          echo "PACKAGE_NAME=$NEW_NAME" >> $GITHUB_ENV
+
+          echo "[*] Verifying architecture of $NEW_NAME..."
+          file dist/faultycmd/faultycmd
+
+      - name: Upload Action Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: faultycmd-macos-${{ matrix.arch }}
+          path: "${{ env.PACKAGE_NAME }}"
+          retention-days: 30
+
+      - name: Upload to GitHub Releases (Only Releases)
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+          files: "${{ env.PACKAGE_NAME }}"
