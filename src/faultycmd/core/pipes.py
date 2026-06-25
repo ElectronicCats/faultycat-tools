@@ -23,6 +23,8 @@ def get_pulseview_path() -> Path | None:
     candidates: list[Path] = []
     if system == "Windows":
         candidates = [
+            Path("C:\\Program Files\\sigrok\\PulseView\\pulseview.exe"),
+            Path("C:\\Program Files (x86)\\sigrok\\PulseView\\pulseview.exe"),
             Path("C:\\Program Files\\PulseView\\pulseview.exe"),
             Path("C:\\Program Files (x86)\\PulseView\\pulseview.exe"),
         ]
