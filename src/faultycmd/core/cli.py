@@ -213,20 +213,18 @@ def devices() -> None:
             probe = EmfiClient(emfi_port, check_firmware_version=False)
             with probe as cli:
                 payload = cli.ping()
-            from ..utils.version_check import host_version_tuple, parse_ping_version
+            from ..utils.version_check import EXPECTED_BOARD, parse_ping_version
 
             fw_tuple = parse_ping_version(payload)
             fw_str = ".".join(str(v) for v in fw_tuple)
-            fw_match = fw_tuple == host_version_tuple()
+            fw_match = fw_tuple[0] == EXPECTED_BOARD
     except (VersionMismatchError, OSError, RuntimeError) as e:
         fw_str, fw_match = f"unreachable ({e})", None
 
     if fw_match is True:
-        print_success(f"Firmware: v{fw_str}  (match)")
+        print_success(f"Firmware: v{fw_str}  (board match)")
     elif fw_match is False:
-        print_error(
-            f"Firmware: v{fw_str}  (host v{__version__} — mismatch, re-flash to recover)"
-        )
+        print_error(f"Firmware: v{fw_str}  (wrong board, re-flash to recover)")
     else:
         print_warning(f"Firmware: {fw_str}")
 

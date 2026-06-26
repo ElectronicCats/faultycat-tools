@@ -1,15 +1,13 @@
 """RP2040 firmware update via GitHub Releases.
 
-faultycmd pins an *exact* version match between host and firmware
-(see :mod:`..utils.version_check`) — both are cut together and
-attached to the same tag on the ``ElectronicCats/faultycat`` GitHub
-repo (e.g. tag ``v3.0.0.0`` carries ``faultycat_v3.0.0.0.uf2``
-alongside the ``faultycmd`` wheel/exe/tarball). So ``faultycmd
-update`` doesn't chase "latest" — it fetches the UF2 for the tag
-matching *this host's* ``__version__`` and flashes it, keeping the
-pair in lockstep. If that tag has no published release yet (a dev
-build ahead of the last cut release), there's nothing to flash and
-the command says so.
+The host (``faultycmd``) and the firmware version independently —
+see :mod:`..utils.version_check`, which only requires the firmware's
+board id to match :data:`..utils.version_check.EXPECTED_BOARD`. So
+``faultycmd update`` chases the *latest* tag published on the
+``ElectronicCats/faultycat-firmware`` GitHub repo (e.g.
+``faultycat_v3.0.0.0.uf2`` attached to tag ``v3.0.0.0``) rather than
+deriving a tag from the host's own ``__version__``. If no release has
+been published yet, there's nothing to flash and the command says so.
 
 Flashing rides the RP2040's UF2 mass-storage bootloader: once the
 board is in boot mode it enumerates as a ``RPI-RP2`` USB drive, and
@@ -41,7 +39,7 @@ from ..utils.output import (
     print_success,
     print_warning,
 )
-from ..utils.version_check import host_version_tuple
+from ..utils.version_check import EXPECTED_BOARD, host_version_tuple
 from .usb import discover
 
 GITHUB_RELEASES_API = (
@@ -67,10 +65,12 @@ def _host_version_str() -> str:
 
 
 def get_latest_release_tag() -> str | None:
-    """Best-effort lookup of the most recently published release tag.
+    """Look up the most recently published firmware release tag.
 
-    Informational only (lets the operator know if their host build is
-    ahead of the last cut release) — None on any network failure.
+    This is the update target — ``faultycmd update`` flashes whatever
+    this returns, independent of the host's own ``__version__``.
+    Returns None on any network failure or if nothing has been
+    published yet.
     """
     try:
         resp = requests.get(f"{GITHUB_RELEASES_API}/latest", timeout=_REQUEST_TIMEOUT_S)
@@ -248,24 +248,31 @@ def check_and_update_firmware(force: bool = False) -> bool:
     successfully flashed, False otherwise.
     """
     host_str = _host_version_str()
-    tag = f"v{host_str}"
-    print_info(f"Host version: {host_str} (target tag: {tag})")
+    print_info(f"Host version: {host_str}")
 
-    latest_tag = get_latest_release_tag()
-    if latest_tag and latest_tag != tag:
-        print_dim(f"Latest published release: {latest_tag}")
+    tag = get_latest_release_tag()
+    if tag is None:
+        print_error("Could not determine the latest published firmware release.")
+        print_dim("Check your internet connection, or build/flash manually.")
+        return False
+    print_info(f"Latest published firmware release: {tag}")
 
     device_ver = get_connected_firmware_version()
     if device_ver is not None:
         device_str = ".".join(str(v) for v in device_ver)
         print_info(f"Connected firmware version: {device_str}")
-        if device_ver == host_version_tuple():
+        if device_ver[0] != EXPECTED_BOARD:
+            print_warning(
+                f"Board mismatch: device board={device_ver[0]} ≠ expected "
+                f"board={EXPECTED_BOARD} — this build may not be safe to flash."
+            )
+        elif f"v{device_str}" == tag:
             if not force:
-                print_success("Firmware already matches this host version.")
+                print_success("Firmware already matches the latest release.")
                 return True
             print_warning("Force re-flash requested — firmware already matches.")
         else:
-            print_warning(f"Firmware mismatch: device={device_str} ≠ host={host_str}")
+            print_warning(f"Firmware outdated: device={device_str} ≠ latest={tag}")
     else:
         print_warning("No FaultyCat device detected on its CDC interfaces.")
 
@@ -276,12 +283,7 @@ def check_and_update_firmware(force: bool = False) -> bool:
         return False
 
     if asset is None:
-        print_error(f"No UF2 published for tag {tag} yet.")
-        print_dim(
-            "This host build may be ahead of the last cut release "
-            "(a dev/test build) — wait for the matching GitHub Release, "
-            "or build/flash the firmware manually."
-        )
+        print_error(f"No UF2 attached to release {tag}.")
         return False
 
     print_info(f"Resolved firmware asset: {asset.uf2_name}")

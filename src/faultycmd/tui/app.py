@@ -82,11 +82,7 @@ from .modals import (
     ScannerFormState,
 )
 from ..core.usb import PortDiscoveryError, cdc_for
-from ..utils.version_check import (
-    VersionMismatchError,
-    allow_mismatch,
-    host_version_tuple,
-)
+from ..utils.version_check import EXPECTED_BOARD, VersionMismatchError, allow_mismatch
 
 # -----------------------------------------------------------------------------
 # Diag snapshot parser — matches the line emitted every 500 ms by
@@ -473,13 +469,13 @@ class FaultycmdTUI(App[None]):
             tag = "fw ?"
         else:
             fw_str = ".".join(str(v) for v in fw)
-            matched = fw == host_version_tuple()
+            matched = fw[0] == EXPECTED_BOARD
             if matched:
                 tag = f"fw v{fw_str} ✓"
             elif allow_mismatch():
-                tag = f"fw v{fw_str} (mismatch — override active)"
+                tag = f"fw v{fw_str} (wrong board — override active)"
             else:
-                tag = f"fw v{fw_str} ✗ (host v{__version__})"
+                tag = f"fw v{fw_str} ✗ (expects board {EXPECTED_BOARD})"
         self.sub_title = f"host v{__version__}  ·  {tag}"
 
     def on_unmount(self) -> None:
