@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release tag to upload assets to (ex: v3.0.0.5)'
+        description: 'Release tag to upload assets to (ex: v1.0.0)'
         required: true
-        default: 'v3.0.0.5'
+        default: 'v1.0.0'
 
 jobs:
   build-mac:

@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release tag to upload assets to (ex: v3.0.0.5)'
+        description: 'Release tag to upload assets to (ex: v1.0.0)'
         required: false
-        default: 'v3.0.0.5'
+        default: 'v1.0.0'
 
 jobs:
   build-windows:
@@ -49,6 +49,10 @@ jobs:
     - name: Install Inno Setup
       run: |
         choco install innosetup -y
+
+    - name: Pin Installer Version
+      run: |
+        (Get-Content installer\faultycat_installer.iss) -replace '^AppVersion=.*', "AppVersion=${{ steps.get_version.outputs.version }}" | Set-Content installer\faultycat_installer.iss
 
     - name: Create Installer
       run: |
