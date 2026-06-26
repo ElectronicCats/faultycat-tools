@@ -612,6 +612,13 @@ class FaultycmdTUI(App[None]):
                     snap = DiagSnapshot.parse(line)
                     if snap is not None:
                         self._post(self._update_diag, snap)
+            except TypeError:
+                # force_close_serials() can null out the underlying fd
+                # while this thread is mid-read() on shutdown — pyserial
+                # then raises TypeError instead of OSError. Treat it the
+                # same as a closed port: the loop condition will exit on
+                # the next pass since _stop_workers is set first.
+                break
             except OSError as e:
                 self._post(self._note_error, f"diag: {e}")
                 self._stop_workers.wait(1.0)
