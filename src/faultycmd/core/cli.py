@@ -232,6 +232,41 @@ def devices() -> None:
 
 
 # -----------------------------------------------------------------------------
+# `verify`
+# -----------------------------------------------------------------------------
+
+
+@main.command()
+@click.option(
+    "--quiet",
+    "-q",
+    is_flag=True,
+    help="Show only the PASS/FAIL summary.",
+)
+def verify(quiet: bool) -> None:
+    """Run a communication smoke test against every detected FaultyCat CDC.
+
+    Checks EMFI (ping + status), crowbar (ping + status), the scanner
+    text shell (``help``), and that the target-UART data CDC opens
+    cleanly. Useful after flashing new firmware or wiring up a board
+    for the first time.
+    """
+    from .verify import run_verification
+
+    success, _results = run_verification(quiet=quiet)
+
+    if success:
+        print_success("Verification completed successfully!")
+    else:
+        print_error("Verification failed!")
+        print_warning("Troubleshooting tips:")
+        print_dim("1. Make sure the FaultyCat is connected via USB")
+        print_dim("2. Try reconnecting the USB cable")
+        print_dim("3. Check udev rules / dialout group: faultycmd setup-env")
+        raise SystemExit(1)
+
+
+# -----------------------------------------------------------------------------
 # `emfi`
 # -----------------------------------------------------------------------------
 
