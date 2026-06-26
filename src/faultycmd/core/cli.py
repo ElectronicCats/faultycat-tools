@@ -267,6 +267,34 @@ def verify(quiet: bool) -> None:
 
 
 # -----------------------------------------------------------------------------
+# `update`
+# -----------------------------------------------------------------------------
+
+
+@main.command()
+@click.option(
+    "--force",
+    "-f",
+    is_flag=True,
+    help="Re-flash even if the connected firmware already matches this host version.",
+)
+def update(force: bool) -> None:
+    """Download and flash the firmware build matching this host version.
+
+    Host and firmware versions are released together — this fetches
+    the .uf2 asset from the GitHub Release tagged to this host's
+    version and flashes it over the RP2040's UF2 bootloader. If the
+    board isn't already in boot mode, you'll be prompted to put it
+    there (it enumerates as a ``RPI-RP2`` USB drive); there's no
+    remote reboot verb to do that automatically.
+    """
+    from .fw_update import check_and_update_firmware
+
+    if not check_and_update_firmware(force=force):
+        raise SystemExit(1)
+
+
+# -----------------------------------------------------------------------------
 # `emfi`
 # -----------------------------------------------------------------------------
 
