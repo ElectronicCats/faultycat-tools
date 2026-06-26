@@ -6,6 +6,7 @@ import pytest
 
 from faultycmd import __version__
 from faultycmd.utils.version_check import (
+    EXPECTED_BOARD,
     VersionMismatchError,
     allow_mismatch,
     assert_version_match,
@@ -29,17 +30,18 @@ def _reset_global():
 
 def test_host_version_tuple_parses_self():
     tup = host_version_tuple()
-    assert len(tup) == 4
+    assert len(tup) == 3
     assert all(isinstance(v, int) for v in tup)
-    assert ".".join(str(v) for v in tup) == __version__
+    expected = tuple(int(s) for s in __version__.split("."))
+    assert tup == expected
 
 
 # -- parse_ping_version -------------------------------------------
 
 
 def test_parse_ping_version_unpacks_six_byte_payload():
-    payload = bytes([ord("F"), ord("4"), 3, 1, 4, 1])
-    assert parse_ping_version(payload) == (3, 1, 4, 1)
+    payload = bytes([ord("F"), ord("4"), 2, 2, 1, 0])
+    assert parse_ping_version(payload) == (2, 2, 1, 0)
 
 
 def test_parse_ping_version_handles_crowbar_family():
@@ -68,7 +70,7 @@ def test_parse_ping_version_malformed_raises():
 
 
 def test_parse_shell_version_strips_prefix():
-    assert parse_shell_version("SHELL: VERSION 3.1.4.1") == (3, 1, 4, 1)
+    assert parse_shell_version("SHELL: VERSION 2.2.1.0") == (2, 2, 1, 0)
     assert parse_shell_version("SHELL:   VERSION   12.0.0.0  ") == (12, 0, 0, 0)
 
 
@@ -83,22 +85,30 @@ def test_parse_shell_version_malformed_raises():
 
 
 def test_assert_version_match_passes_on_exact():
-    # Whatever the live host version is, parse it and assert it matches.
-    assert_version_match(host_version_tuple())
+    # Whatever the live host version is, prefix it with the expected
+    # board and assert it matches.
+    major, minor, patch = host_version_tuple()
+    assert_version_match((EXPECTED_BOARD, major, minor, patch))
 
 
-def test_assert_version_match_raises_on_any_segment_difference():
-    fw = host_version_tuple()
-    # Bump TWEAK to force a mismatch; Exact policy means *any* segment
-    # difference triggers.
-    bumped = (fw[0], fw[1], fw[2], fw[3] + 1)
+def test_assert_version_match_ignores_version_segment_difference():
+    # Host and firmware version independently — only the board id is
+    # checked, so a MAJOR/MINOR/PATCH difference must NOT raise.
+    major, minor, patch = host_version_tuple()
+    bumped = (EXPECTED_BOARD, major, minor, patch + 1)
+    assert_version_match(bumped)
+
+
+def test_assert_version_match_raises_on_board_mismatch():
+    major, minor, patch = host_version_tuple()
+    wrong_board = (EXPECTED_BOARD + 1, major, minor, patch)
     with pytest.raises(VersionMismatchError):
-        assert_version_match(bumped)
+        assert_version_match(wrong_board)
 
 
 def test_assert_version_match_honours_global_override():
-    fw = host_version_tuple()
-    bumped = (fw[0] + 1, fw[1], fw[2], fw[3])
+    major, minor, patch = host_version_tuple()
+    bumped = (EXPECTED_BOARD + 1, major, minor, patch)
     set_allow_mismatch(True)
     assert allow_mismatch() is True
     # Should NOT raise.
