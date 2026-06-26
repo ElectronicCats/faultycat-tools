@@ -45,7 +45,7 @@ from ..utils.version_check import host_version_tuple
 from .usb import discover
 
 GITHUB_RELEASES_API = (
-    "https://api.github.com/repos/ElectronicCats/faultycat/releases/latest"
+    "https://api.github.com/repos/ElectronicCats/faultycat-firmware/releases"
 )
 _REQUEST_TIMEOUT_S = 10
 _DOWNLOAD_TIMEOUT_S = 60
