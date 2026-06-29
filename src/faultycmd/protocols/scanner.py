@@ -666,9 +666,23 @@ class ScannerClient:
         DTR immediately, losing the race every time. Clear HUPCL on
         the fd before returning so DTR stays asserted across the
         close.
+
+        ``_disable_hupcl`` is POSIX-only (termios) and a no-op on
+        Windows, where ``usbser.sys`` typically forces DTR low on
+        ``CloseHandle()`` regardless — see
+        docs/WINDOWS_SUMP_DTR_ISSUE.md. The firmware now debounces
+        that disconnect (``SUMP_EXIT_DEBOUNCE_MS`` in main.c) so a
+        same-port reopen shortly after this close (PulseView) survives
+        it; forcing ``dtr = True`` here first is a no-cost best-effort
+        extra that can't hurt and may help on some Windows CDC stacks.
         """
         reply = self._expect_ok("I2C:", f"i2c la sump enter {sda} {scl}")
         _disable_hupcl(self._ser)
+        if self._ser is not None:
+            try:
+                self._ser.dtr = True  # type: ignore[attr-defined]
+            except Exception:
+                pass
         return reply
 
     # -- internals --------------------------------------------------
