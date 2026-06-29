@@ -58,6 +58,7 @@ from ..protocols import (
     EngineError,
     ScannerClient,
     ScannerError,
+    parse_scan_i2c_match,
 )
 from ..protocols.crowbar import CrowbarOutput, CrowbarTrigger
 from ..protocols.emfi import EmfiTrigger
@@ -147,6 +148,34 @@ def _print_status_table(title: str, rows: list[tuple[str, str]]) -> None:
     for k, v in rows:
         table.add_row(k, v)
     console.print(table)
+
+
+def _resolve_i2c_pins(
+    cli: ScannerClient, sda: int | None, scl: int | None, *, timeout_s: float
+) -> tuple[int, int]:
+    """Return ``(sda, scl)``, auto-discovering via a full ``i2c scan``
+    sweep when either pin is omitted.
+
+    The I2C bit-bang core can use any of the 8 scanner-header channels
+    as SDA/SCL (see docs/I2C_SCANNER_INTERNALS.md) — there's no fixed
+    pin pair — so when the operator doesn't already know the wiring,
+    running the same P(8,2) sweep `i2c scan` does is the only way to
+    find it.
+    """
+    if sda is not None and scl is not None:
+        return sda, scl
+    if (sda is None) != (scl is None):
+        raise click.UsageError("Pass both SDA and SCL, or neither to auto-discover.")
+    print_info("No SDA/SCL given — running `i2c scan` to auto-discover pins...")
+    lines = cli.scan_i2c(timeout_s=timeout_s, on_progress=console.print)
+    match = parse_scan_i2c_match(lines)
+    if match is None:
+        raise click.ClickException(
+            "i2c scan found no device — wire the target or pass --sda/--scl explicitly."
+        )
+    found_sda, found_scl, _addrs = match
+    print_success(f"Auto-discovered sda=GP{found_sda} scl=GP{found_scl}")
+    return found_sda, found_scl
 
 
 # -----------------------------------------------------------------------------
@@ -859,8 +888,8 @@ def i2c_scan(ctx: click.Context, timeout_s: float) -> None:
 
 
 @i2c.command("probe")
-@click.argument("sda", type=int)
-@click.argument("scl", type=int)
+@click.argument("sda", type=int, required=False, default=None)
+@click.argument("scl", type=int, required=False, default=None)
 @click.option(
     "--timeout-s",
     type=float,
@@ -868,17 +897,43 @@ def i2c_scan(ctx: click.Context, timeout_s: float) -> None:
     show_default=True,
     help="Max probe time in seconds.",
 )
+@click.option(
+    "--scan-timeout-s",
+    type=float,
+    default=30.0,
+    show_default=True,
+    help="Max time for the auto-discovery `i2c scan` (only used if SDA/SCL are omitted).",
+)
 @click.pass_context
-def i2c_probe(ctx: click.Context, sda: int, scl: int, timeout_s: float) -> None:
-    """Rescan I2C addresses on known SDA/SCL pins (skip the full sweep)."""
+def i2c_probe(
+    ctx: click.Context,
+    sda: int | None,
+    scl: int | None,
+    timeout_s: float,
+    scan_timeout_s: float,
+) -> None:
+    """Rescan I2C addresses on known SDA/SCL pins (skip the full sweep).
+
+    SDA/SCL can be omitted — I2C has no fixed pin pair (any of the 8
+    scanner-header channels can carry SDA/SCL), so when they're
+    omitted this runs a full `i2c scan` first to find them.
+    """
     with _i2c_client(ctx) as cli:
+        sda, scl = _resolve_i2c_pins(cli, sda, scl, timeout_s=scan_timeout_s)
         for line in cli.i2c_probe(sda, scl, timeout_s=timeout_s):
             console.print(line)
 
 
 @i2c.command("la")
-@click.argument("sda", type=int)
-@click.argument("scl", type=int)
+@click.argument("sda", type=int, required=False, default=None)
+@click.argument("scl", type=int, required=False, default=None)
+@click.option(
+    "--scan-timeout-s",
+    type=float,
+    default=30.0,
+    show_default=True,
+    help="Max time for the auto-discovery `i2c scan` (only used if SDA/SCL are omitted).",
+)
 @click.option(
     "--interval-us",
     type=int,
@@ -917,16 +972,23 @@ def i2c_probe(ctx: click.Context, sda: int, scl: int, timeout_s: float) -> None:
 @click.pass_context
 def i2c_la(
     ctx: click.Context,
-    sda: int,
-    scl: int,
+    sda: int | None,
+    scl: int | None,
+    scan_timeout_s: float,
     interval_us: int,
     n: int,
     decode: bool,
     vcd_path: str | None,
     timeout_s: float,
 ) -> None:
-    """Capture a raw SDA/SCL trace with the firmware logic analyzer."""
+    """Capture a raw SDA/SCL trace with the firmware logic analyzer.
+
+    SDA/SCL can be omitted — I2C has no fixed pin pair (any of the 8
+    scanner-header channels can carry SDA/SCL), so when they're
+    omitted this runs a full `i2c scan` first to find them.
+    """
     with _i2c_client(ctx) as cli:
+        sda, scl = _resolve_i2c_pins(cli, sda, scl, timeout_s=scan_timeout_s)
         cap = cli.i2c_la(sda, scl, interval_us, n, timeout_s=timeout_s)
     print_success(
         f"{len(cap.samples)} samples @ {cap.interval_us}us "
@@ -952,8 +1014,15 @@ def i2c_la(
 
 
 @i2c.command("la-sump-arm")
-@click.argument("sda", type=int)
-@click.argument("scl", type=int)
+@click.argument("sda", type=int, required=False, default=None)
+@click.argument("scl", type=int, required=False, default=None)
+@click.option(
+    "--scan-timeout-s",
+    type=float,
+    default=30.0,
+    show_default=True,
+    help="Max time for the auto-discovery `i2c scan` (only used if SDA/SCL are omitted).",
+)
 @click.option(
     "--pulseview/--no-pulseview",
     "open_pulseview",
@@ -962,7 +1031,11 @@ def i2c_la(
 )
 @click.pass_context
 def i2c_la_sump_arm(
-    ctx: click.Context, sda: int, scl: int, open_pulseview: bool
+    ctx: click.Context,
+    sda: int | None,
+    scl: int | None,
+    scan_timeout_s: float,
+    open_pulseview: bool,
 ) -> None:
     """Arm the firmware's SUMP/OLS mode for a live PulseView capture.
 
@@ -974,8 +1047,14 @@ def i2c_la_sump_arm(
     pass --no-pulseview to skip that and open it yourself. If anything
     else touches the line first and drops DTR, the firmware reverts to
     the text shell and this command must be run again.
+
+    SDA/SCL can be omitted — I2C has no fixed pin pair (any of the 8
+    scanner-header channels can carry SDA/SCL), so when they're
+    omitted this runs a full `i2c scan` first to find them, before
+    arming SUMP mode.
     """
     with _i2c_client(ctx) as cli:
+        sda, scl = _resolve_i2c_pins(cli, sda, scl, timeout_s=scan_timeout_s)
         reply = cli.i2c_la_sump_arm(sda, scl)
         port = cli.port
     print_success(reply)
