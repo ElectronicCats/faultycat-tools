@@ -56,6 +56,13 @@ PulseView automatically (driver: `ols`, connected to the scanner CDC
 port). Pass `--no-pulseview` to skip the auto-launch and open it
 yourself.
 
+`<sda>`/`<scl>` can be omitted (`faultycmd i2c la-sump-arm`). I2C has
+no fixed pin pair — the firmware's bit-bang core can use any of the 8
+scanner-header channels as SDA/SCL (see
+[`I2C_SCANNER_INTERNALS.md`](../../faultycat-firmware/docs/I2C_SCANNER_INTERNALS.md)) —
+so when they're left out, the CLI runs a full `i2c scan` sweep first
+to find them before arming SUMP mode.
+
 ## 6. Configure channels + I2C decoder (one-time)
 
 PulseView's `-d ols:conn=<port>` flag (used internally by
@@ -82,6 +89,11 @@ meaningful for an I2C capture:
 that exact invocation, channel 0 is SDA and channel 1 is SCL. If you
 arm with different pin numbers, map the channels accordingly (channel
 N corresponds to GPIO N for whichever role you assigned it).
+
+If you omit `<sda>`/`<scl>` and let the CLI auto-discover them via
+`i2c scan`, it prints the pair it found (`Auto-discovered sda=GP<n>
+scl=GP<n>`) before arming — use those numbers for the channel mapping
+in step 2/3 below instead of assuming GP0/GP1.
 
 ### Steps
 
