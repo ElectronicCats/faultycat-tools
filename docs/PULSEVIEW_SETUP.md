@@ -63,7 +63,34 @@ scanner-header channels as SDA/SCL (see
 so when they're left out, the CLI runs a full `i2c scan` sweep first
 to find them before arming SUMP mode.
 
-## 6. Configure channels + I2C decoder (one-time)
+## 6. Initial PulseView connection setup
+
+If you open PulseView manually (instead of letting `la-sump-arm`
+launch and connect it for you), you need to point it at the right
+driver and port yourself:
+
+1. Identify the scanner's port with:
+
+   ```bash
+   faultycmd devices
+   ```
+
+   Look for the row with `role` = **scanner** and take its `device`
+   column (e.g. `/dev/ttyACM0` on Linux, `COM5` on Windows).
+
+2. In PulseView, click the connection icon (next to the driver
+   selector, top left) to open **Connect to Device**.
+3. Under **Driver**, pick **Open Bench Logic Sniffer** — this is the
+   same `ols` driver `la-sump-arm` uses internally via
+   `-d ols:conn=<port>`.
+4. Under **Connection**, select **Serial Port** and enter the port
+   found in step 1.
+5. Click **Scan for devices**, then **OK**. PulseView should show 8
+   channels (`0`–`7`) coming from the firmware.
+
+Once connected, continue with the channel/decoder setup in step 7.
+
+## 7. Configure channels + I2C decoder (one-time)
 
 PulseView's `-d ols:conn=<port>` flag (used internally by
 `la-sump-arm`) only selects the driver and connects to the device — it
@@ -94,6 +121,10 @@ If you omit `<sda>`/`<scl>` and let the CLI auto-discover them via
 `i2c scan`, it prints the pair it found (`Auto-discovered sda=GP<n>
 scl=GP<n>`) before arming — use those numbers for the channel mapping
 in step 2/3 below instead of assuming GP0/GP1.
+
+(If you connected manually via step 6 instead of `la-sump-arm`, skip
+the `i2c scan` auto-discovery note above and use whichever
+`<sda>`/`<scl>` pins you intend to probe.)
 
 ### Steps
 
