@@ -1044,13 +1044,13 @@ def i2c_la_sump_arm(
     port until the host drops DTR, which sigrok's stock "Openbench
     Logic Sniffer" (ols) driver expects with no further setup. By
     default this also launches PulseView on this same port right away;
-    pass --no-pulseview to skip that and open it yourself. The
-    firmware debounces a brief disconnect (see
-    docs/WINDOWS_SUMP_DTR_ISSUE.md) so the close/reopen race against
-    PulseView survives on its own, but if anything else holds the
-    line dropped for longer, or touches it before PulseView opens it,
-    the firmware reverts to the text shell and this command must be
-    run again.
+    pass --no-pulseview to skip that and open it yourself. On Windows
+    this close always drops DTR (see docs/WINDOWS_SUMP_DTR_ISSUE.md),
+    so the firmware now gives a ~60s grace period before reverting to
+    the text shell on disconnect — enough time to alt-tab to PulseView
+    and click "Scan for devices". If that window is exceeded, or
+    anything else touches the line first, this command must be run
+    again.
 
     SDA/SCL can be omitted — I2C has no fixed pin pair (any of the 8
     scanner-header channels can carry SDA/SCL), so when they're
