@@ -25,6 +25,11 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v4
 
+    - name: Log Commit Being Built
+      run: |
+        Write-Host "Building commit: $(git rev-parse HEAD)"
+        Write-Host "Branch/ref: ${{ github.ref_name }}"
+
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
