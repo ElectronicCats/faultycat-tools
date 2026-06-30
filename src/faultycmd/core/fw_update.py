@@ -136,8 +136,6 @@ def download_uf2(asset: ReleaseAsset) -> Path:
 
 def find_rp2040_mount_point() -> str | None:
     """Find the RP2040 mass-storage mount point when in UF2 boot mode."""
-    import platform
-
     system = platform.system()
 
     if system == "Linux":
@@ -159,8 +157,6 @@ def find_rp2040_mount_point() -> str | None:
 
     elif system == "Windows":
         # Check all drive letters for RPI-RP2 volume
-        import string
-
         for letter in string.ascii_uppercase:
             drive = f"{letter}:\\"
             try:

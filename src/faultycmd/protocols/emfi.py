@@ -16,7 +16,6 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Optional
 
 from ..core.usb import cdc_for
 from ._base import BinaryProtoClient, EngineError
@@ -181,8 +180,3 @@ __all__ = [
     "EmfiStatus",
     "EmfiClient",
 ]
-
-
-# Stub the unused param to keep tooling quiet while keeping the
-# `Optional` import meaningful for type-checker friendliness.
-_ = Optional

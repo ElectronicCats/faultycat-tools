@@ -37,6 +37,7 @@ from __future__ import annotations
 import os
 import platform
 import random as _random
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -1340,9 +1341,6 @@ def completion_install(shell: str | None) -> None:
         print_error("Shell completion is not supported on Windows.")
         raise SystemExit(1)
 
-    import shutil
-    import subprocess as _sp
-
     faultycmd_bin = shutil.which("faultycmd")
     if not faultycmd_bin:
         print_error("'faultycmd' not found on PATH.")
@@ -1385,7 +1383,7 @@ def completion_install(shell: str | None) -> None:
         rc_note = None
 
     try:
-        result = _sp.run(
+        result = subprocess.run(
             [faultycmd_bin],
             env={**os.environ, env_var: source_flag},
             capture_output=True,
