@@ -84,6 +84,16 @@ class EmfiFormState:
             )
 
 
+class _StatusLineMixin:
+    """Shared `#status_line` updater for the control modals below."""
+
+    def _set_status(self, msg: str) -> None:
+        try:
+            self.query_one("#status_line", Static).update(msg)
+        except Exception:
+            pass
+
+
 # -----------------------------------------------------------------
 # HV confirm
 # -----------------------------------------------------------------
@@ -143,7 +153,7 @@ class HvConfirmModal(ModalScreen[bool]):
 _HV_CONFIRM_ACTIONS = frozenset({"arm"})
 
 
-class EmfiControlModal(ModalScreen[None]):
+class EmfiControlModal(_StatusLineMixin, ModalScreen[None]):
     """EMFI configure / arm / fire / disarm + capture viewer.
 
     The modal owns its own form state (`self.state: EmfiFormState`)
@@ -254,12 +264,6 @@ class EmfiControlModal(ModalScreen[None]):
             return False
         self.state = candidate
         return True
-
-    def _set_status(self, msg: str) -> None:
-        try:
-            self.query_one("#status_line", Static).update(msg)
-        except Exception:
-            pass
 
     # -- actions ---------------------------------------------------
 
@@ -395,7 +399,7 @@ class CampaignFormState:
         self.parse()
 
 
-class CampaignControlModal(ModalScreen[None]):
+class CampaignControlModal(_StatusLineMixin, ModalScreen[None]):
     """Campaign full-sweep configure / start / stop / drain.
 
     Replaces the F10 dashboard's `s` toggle-demo (locked to a
@@ -503,12 +507,6 @@ class CampaignControlModal(ModalScreen[None]):
         self.state = candidate
         return True
 
-    def _set_status(self, msg: str) -> None:
-        try:
-            self.query_one("#status_line", Static).update(msg)
-        except Exception:
-            pass
-
     def on_button_pressed(self, event: Button.Pressed) -> None:
         # Each callback dispatches the CDC1 op to a daemon thread
         # (see `tui.action_open_campaign_modal._run`) so the Textual
@@ -611,7 +609,7 @@ class CrowbarFormState:
             )
 
 
-class CrowbarControlModal(ModalScreen[None]):
+class CrowbarControlModal(_StatusLineMixin, ModalScreen[None]):
     """Crowbar configure / arm / fire / disarm.
 
     Unlike EMFI, no action involves the HV cap — the crowbar gates
@@ -717,12 +715,6 @@ class CrowbarControlModal(ModalScreen[None]):
         self.state = candidate
         return True
 
-    def _set_status(self, msg: str) -> None:
-        try:
-            self.query_one("#status_line", Static).update(msg)
-        except Exception:
-            pass
-
     def on_button_pressed(self, event: Button.Pressed) -> None:
         # Each callback dispatches the CDC1 op to a daemon thread
         # (see `tui.action_open_crowbar_modal._run`) so the Textual
@@ -796,7 +788,7 @@ class ScannerFormState:
         return asdict(self)
 
 
-class ScannerControlModal(ModalScreen[None]):
+class ScannerControlModal(_StatusLineMixin, ModalScreen[None]):
     """``scan swd`` over CDC2's text shell.
 
     The dashboard wires ``scan_swd_cb`` through ``_run_scanner_task``,
@@ -851,12 +843,6 @@ class ScannerControlModal(ModalScreen[None]):
                 yield Button("Scan SWD", id="apply_scan_swd", variant="primary")
                 yield Button("Scan I2C", id="apply_scan_i2c", variant="primary")
                 yield Button("Close", id="close")
-
-    def _set_status(self, msg: str) -> None:
-        try:
-            self.query_one("#status_line", Static).update(msg)
-        except Exception:
-            pass
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         bid = event.button.id or ""
