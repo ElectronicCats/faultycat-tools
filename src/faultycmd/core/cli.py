@@ -64,6 +64,7 @@ from ..protocols import (
 from ..protocols.crowbar import CrowbarOutput, CrowbarTrigger
 from ..protocols.emfi import EmfiTrigger
 from ..protocols.i2c_decode import decode_i2c, samples_to_vcd
+from ..protocols.uart_decode import decode_uart, samples_to_vcd_uart
 from .usb import PortDiscoveryError, discover
 from ..utils.version_check import VersionMismatchError, set_allow_mismatch
 from ..utils.output import (
@@ -1178,6 +1179,159 @@ def uart_stopbits(ctx: click.Context, value: str) -> None:
     with _uart_control_client(ctx) as cli:
         reply = cli.uart_set_stopbits(int(value))
     print_success(reply)
+
+
+@uart.command("la")
+@click.argument("rx", type=int, required=False, default=0)
+@click.argument("tx", type=int, required=False, default=1)
+@click.option(
+    "--baud",
+    type=int,
+    default=115200,
+    show_default=True,
+    help="UART baud rate for --decode.",
+)
+@click.option(
+    "--interval-us",
+    "interval_us",
+    type=int,
+    default=2,
+    show_default=True,
+    help="Sample interval in µs.",
+)
+@click.option(
+    "--samples",
+    "n_samples",
+    type=int,
+    default=2048,
+    show_default=True,
+    help="Max samples to capture.",
+)
+@click.option(
+    "--decode/--no-decode",
+    "do_decode",
+    default=True,
+    help="Decode raw samples into UART frames (default: on).",
+)
+@click.option(
+    "--vcd", "vcd_path", default=None, help="Export raw capture to a VCD file."
+)
+@click.option(
+    "--timeout-s",
+    type=float,
+    default=10.0,
+    show_default=True,
+    help="Capture timeout in seconds.",
+)
+@click.pass_context
+def uart_la(
+    ctx: click.Context,
+    rx: int,
+    tx: int,
+    baud: int,
+    interval_us: int,
+    n_samples: int,
+    do_decode: bool,
+    vcd_path: str | None,
+    timeout_s: float,
+) -> None:
+    """Capture a raw RX/TX logic trace (GP0=RX, GP1=TX by default).
+
+    Records all 8 scanner-header pins simultaneously at --interval-us µs
+    per sample. Use --decode to decode the RX channel into UART frames,
+    or --vcd to export the raw capture for PulseView/GTKWave.
+    """
+    spb = (1_000_000 / baud) / interval_us
+    if spb < 4:
+        print_warning(
+            f"Oversampling ratio is {spb:.1f}× (< 4×) — decoding may be "
+            "unreliable. Reduce --interval-us or lower --baud."
+        )
+    with _uart_control_client(ctx) as cli:
+        cap = cli.uart_la(rx, tx, interval_us, n_samples, timeout_s=timeout_s)
+    print_success(
+        f"{len(cap.samples)} samples @ {cap.interval_us}µs "
+        f"(rx=GP{cap.rx_gp} tx=GP{cap.tx_gp})"
+    )
+    if vcd_path is not None:
+        Path(vcd_path).write_text(
+            samples_to_vcd_uart(cap.samples, cap.interval_us, cap.rx_gp, cap.tx_gp)
+        )
+        print_success(f"VCD written to {vcd_path}")
+    if do_decode:
+        frames = decode_uart(cap.samples, cap.interval_us, rx_bit=cap.rx_gp, baud=baud)
+        if not frames:
+            print_info("No UART frames decoded.")
+            return
+        table = Table(
+            box=box.SIMPLE, show_header=True, header_style=STYLES["highlight"]
+        )
+        table.add_column("t_us", justify="right")
+        table.add_column("hex", justify="center")
+        table.add_column("ASCII", justify="center")
+        table.add_column("framing_error")
+        for fr in frames:
+            ascii_ch = chr(fr.byte) if 0x20 <= fr.byte < 0x7F else "·"
+            fe_str = "[red]FE[/red]" if fr.framing_error else ""
+            table.add_row(f"{fr.t_us:.1f}", f"{fr.byte:02X}", ascii_ch, fe_str)
+        console.print(table)
+
+
+@uart.command("la-sump-arm")
+@click.argument("rx", type=int, required=False, default=0)
+@click.argument("tx", type=int, required=False, default=1)
+@click.option(
+    "--pulseview/--no-pulseview",
+    "open_pulseview",
+    default=True,
+    help="Launch PulseView after arming (default: on).",
+)
+@click.pass_context
+def uart_la_sump_arm(
+    ctx: click.Context,
+    rx: int,
+    tx: int,
+    open_pulseview: bool,
+) -> None:
+    """Arm the firmware's SUMP/OLS mode for a live PulseView capture.
+
+    Sends `uart la sump enter` and disconnects immediately — the firmware
+    then speaks the SUMP protocol on this same port until the host drops
+    DTR. RX defaults to GP0 (CH0) and TX defaults to GP1 (CH1). By
+    default also launches PulseView on this same port right away; pass
+    --no-pulseview to skip that and open it yourself.
+    """
+    with _uart_control_client(ctx) as cli:
+        reply = cli.uart_la_sump_arm(rx, tx)
+        port = cli.port
+    print_success(reply)
+
+    if not open_pulseview:
+        print_warning(
+            "Open PulseView/sigrok-cli on this port NOW (driver: Openbench "
+            "Logic Sniffer / ols) — closing or reopening the port before "
+            "that drops DTR and reverts the firmware to the text shell."
+        )
+        return
+
+    from .pipes import get_pulseview_path
+
+    pulseview_path = get_pulseview_path()
+    if pulseview_path is None:
+        print_warning(
+            "PulseView not found — open it manually NOW (driver: "
+            "Openbench Logic Sniffer / ols, port: "
+            f"{port}) before anything else touches this port."
+        )
+        return
+
+    subprocess.Popen(
+        [str(pulseview_path), "-d", f"ols:conn={port}"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    print_success(f"PulseView launched on {port} (driver: ols)")
 
 
 @uart.command("console")

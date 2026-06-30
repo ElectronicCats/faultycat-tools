@@ -125,6 +125,21 @@ class I2cLaCapture:
     samples: bytes
 
 
+@dataclass
+class UartLaCapture:
+    """Raw logic-analyzer capture from ``uart la``.
+
+    ``samples`` is one byte per sample, each bit corresponds to
+    GP0..GP7 (bit 0 = GP0 = CH0, bit 1 = GP1 = CH1, …). Sample ``i``
+    occurred at ``i * interval_us``.
+    """
+
+    rx_gp: int
+    tx_gp: int
+    interval_us: int
+    samples: bytes
+
+
 class ScannerClient:
     """Line-buffered CDC2 text-shell client.
 
@@ -685,6 +700,118 @@ class ScannerClient:
                 pass
         return reply
 
+    def uart_la(
+        self,
+        rx: int,
+        tx: int,
+        interval_us: int,
+        max_samples: int,
+        timeout_s: float = 10.0,
+    ) -> UartLaCapture:
+        """Capture a raw RX/TX trace via the firmware logic analyzer.
+
+        Reply has two parts: one ``UART:`` summary line, then a hexdump
+        of the samples emitted without the ``UART:`` prefix (same
+        streaming format as ``i2c la``). The ``stream n=`` field in the
+        summary gives the deterministic sample count so the receiver
+        knows exactly how many hex characters to expect.
+        """
+        max_samples = min(max_samples, 8192)
+        ser = self._require_serial()
+        ser.reset_input_buffer()
+        ser.write(f"uart la {rx} {tx} {interval_us} {max_samples}\r\n".encode())
+        start = time.time()
+        deadline = start + timeout_s
+
+        buf = ""
+        summary_line: str | None = None
+        while time.time() < deadline:
+            chunk = ser.read(64)
+            if not chunk:
+                continue
+            buf += chunk.decode(errors="replace")
+            while "\n" in buf:
+                line_text, _, buf = buf.partition("\n")
+                stripped = line_text.strip()
+                if stripped.startswith("UART:"):
+                    summary_line = stripped
+                    break
+            if summary_line is not None:
+                break
+        if summary_line is None:
+            raise TimeoutError(
+                f"uart la rx=GP{rx} tx=GP{tx}: no UART: summary line within "
+                f"{timeout_s:.1f}s (device unresponsive or wrong pins?)"
+            )
+        if " ERR " in f" {summary_line} ":
+            raise ScannerError(summary_line)
+
+        m = _UART_LA_OK_RE.search(summary_line)
+        if m is None:
+            raise ScannerError(summary_line)
+        rx_gp = int(m.group("rx"))
+        tx_gp = int(m.group("tx"))
+        n_samples = int(m.group("samples"))
+        reply_interval_us = int(m.group("interval_us"))
+
+        needed = n_samples * 2
+        hex_chars = [c for c in buf if c in _HEX_DIGITS]
+        truncated = "TRUNC" in buf
+        while len(hex_chars) < needed and not truncated and time.time() < deadline:
+            chunk = ser.read(64)
+            if not chunk:
+                continue
+            text = chunk.decode(errors="replace")
+            if "TRUNC" in text:
+                truncated = True
+            hex_chars.extend(c for c in text if c in _HEX_DIGITS)
+        if len(hex_chars) < needed:
+            got = len(hex_chars)
+            elapsed = time.time() - start
+            pct = 100.0 * got / needed
+            if truncated:
+                raise ScannerError(
+                    f"uart la rx=GP{rx} tx=GP{tx}: firmware promised "
+                    f"{n_samples} samples ({needed} hex chars) but gave up "
+                    f"after sending only {got} ({pct:.0f}%) — the host wasn't "
+                    "draining the USB CDC buffer fast enough; retry or try "
+                    "fewer --samples"
+                )
+            raise TimeoutError(
+                f"uart la rx=GP{rx} tx=GP{tx}: firmware promised "
+                f"{n_samples} samples ({needed} hex chars) but only {got} "
+                f"({pct:.0f}%) arrived in {elapsed:.1f}s of {timeout_s:.1f}s "
+                "budget — hexdump transfer stalled or was truncated; retry, "
+                "try fewer --samples, or increase --timeout-s"
+            )
+        samples = bytes.fromhex("".join(hex_chars[:needed]))
+        return UartLaCapture(
+            rx_gp=rx_gp,
+            tx_gp=tx_gp,
+            interval_us=reply_interval_us,
+            samples=samples,
+        )
+
+    def uart_la_sump_arm(self, rx: int, tx: int) -> str:
+        """Arm the firmware's SUMP/OLS mode on ``rx``/``tx`` for a
+        PulseView/sigrok ("ols" driver) capture.
+
+        Caller should close this connection right after this returns —
+        every byte on this CDC is owned by the binary SUMP parser until
+        the host drops DTR. PulseView/sigrok-cli must open the *same*
+        port next. HUPCL is cleared so DTR stays asserted across the
+        close (POSIX only; on Windows the firmware's disconnect debounce
+        provides the grace window instead).
+        """
+        reply = self._expect_ok("UART:", f"uart la sump enter {rx} {tx}")
+        _disable_hupcl(self._ser)
+        if self._ser is not None:
+            try:
+                self._ser.dtr = True  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        return reply
+
     # -- internals --------------------------------------------------
 
     def _expect_ok(self, prefix: str, cmd: str) -> str:
@@ -742,6 +869,13 @@ _I2C_ADDR_RE = re.compile(r"\baddr=0x(?P<addr>[0-9A-Fa-f]{2})\b")
 #     I2C: LA OK sda=GP<n> scl=GP<n> stream n=<n> interval_us=<n>
 _I2C_LA_OK_RE = re.compile(
     r"\bsda=GP(?P<sda>\d+)\s+scl=GP(?P<scl>\d+)\s+stream\s+n=(?P<samples>\d+)"
+    r"\s+interval_us=(?P<interval_us>\d+)\b",
+    re.IGNORECASE,
+)
+# `uart la` summary line (apps/faultycat_fw/main.c::cmd_uart_la):
+#     UART: LA OK rx=GP<n> tx=GP<n> stream n=<n> interval_us=<n>
+_UART_LA_OK_RE = re.compile(
+    r"\brx=GP(?P<rx>\d+)\s+tx=GP(?P<tx>\d+)\s+stream\s+n=(?P<samples>\d+)"
     r"\s+interval_us=(?P<interval_us>\d+)\b",
     re.IGNORECASE,
 )
@@ -814,6 +948,7 @@ def _parse_int_after(line: str, marker: str) -> int | None:
 __all__ = [
     "ACCEPTED_PREFIXES",
     "I2cLaCapture",
+    "UartLaCapture",
     "ScannerClient",
     "ScannerError",
     "parse_scan_swd_match",
