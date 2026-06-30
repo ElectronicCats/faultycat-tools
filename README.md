@@ -39,8 +39,8 @@ faultycmd verify     # smoke-test EMFI, crowbar, scanner, and UART
 faultycmd tui        # launch the interactive Textual dashboard
 ```
 
-See [docs/04-Quick-Reference.md](docs/04-Quick-Reference.md) for the full
-command table and [docs/03-Usage-Guide.md](docs/03-Usage-Guide.md) for
+See [docs/04-Quick-Reference.md](docs/03-Quick-Reference.md) for the full
+command table and [docs/03-Usage-Guide.md](docs/02-Usage-Guide.md) for
 step-by-step workflows.
 
 ## Documentation
