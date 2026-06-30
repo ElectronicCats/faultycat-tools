@@ -357,8 +357,8 @@ def status(ctx: click.Context) -> None:
     _print_status_table(
         "EMFI status",
         [
-            ("state", st.state.name if hasattr(st.state, "name") else str(st.state)),
-            ("err", st.err.name if hasattr(st.err, "name") else str(st.err)),
+            ("state", getattr(st.state, "name", str(st.state))),
+            ("err", getattr(st.err, "name", str(st.err))),
             ("last_fire_at_ms", str(st.last_fire_at_ms)),
             ("capture_fill", str(st.capture_fill)),
             ("pulse_width_us_actual", str(st.pulse_width_us_actual)),
@@ -516,15 +516,12 @@ def crowbar_status(ctx: click.Context) -> None:
     _print_status_table(
         "Crowbar status",
         [
-            ("state", st.state.name if hasattr(st.state, "name") else str(st.state)),
-            ("err", st.err.name if hasattr(st.err, "name") else str(st.err)),
+            ("state", getattr(st.state, "name", str(st.state))),
+            ("err", getattr(st.err, "name", str(st.err))),
             ("last_fire_at_ms", str(st.last_fire_at_ms)),
             ("pulse_width_ns_actual", str(st.pulse_width_ns_actual)),
             ("delay_us_actual", str(st.delay_us_actual)),
-            (
-                "output",
-                st.output.name if hasattr(st.output, "name") else str(st.output),
-            ),
+            ("output", getattr(st.output, "name", str(st.output))),
         ],
     )
 
@@ -645,8 +642,8 @@ def campaign_status(ctx: click.Context) -> None:
     _print_status_table(
         f"Campaign status ({ctx.obj[0]})",
         [
-            ("state", st.state.name if hasattr(st.state, "name") else str(st.state)),
-            ("err", st.err.name if hasattr(st.err, "name") else str(st.err)),
+            ("state", getattr(st.state, "name", str(st.state))),
+            ("err", getattr(st.err, "name", str(st.err))),
             ("step_n", f"{st.step_n}/{st.total_steps}"),
             ("results_pushed", str(st.results_pushed)),
             ("results_dropped", str(st.results_dropped)),
@@ -803,7 +800,7 @@ def campaign_watch(ctx: click.Context, every_ms: int) -> None:
     if last_status is not None:
         st = last_status
         print_success(
-            f"done state={st.state.name if hasattr(st.state, 'name') else st.state} "
+            f"done state={getattr(st.state, 'name', st.state)} "
             f"step={st.step_n}/{st.total_steps} pushed={st.results_pushed} dropped={st.results_dropped}"
         )
 

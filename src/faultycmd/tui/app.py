@@ -626,8 +626,8 @@ class FaultycmdTUI(App[None]):
             return
         self.emfi_panel.update_fields(
             {
-                "state": st.state.name if hasattr(st.state, "name") else str(st.state),
-                "err": st.err.name if hasattr(st.err, "name") else str(st.err),
+                "state": getattr(st.state, "name", str(st.state)),
+                "err": getattr(st.err, "name", str(st.err)),
                 "last_fire_ms": str(st.last_fire_at_ms),
                 "capture_fill": str(st.capture_fill),
                 "width_us": str(st.pulse_width_us_actual),
@@ -640,14 +640,12 @@ class FaultycmdTUI(App[None]):
             return
         self.crowbar_panel.update_fields(
             {
-                "state": st.state.name if hasattr(st.state, "name") else str(st.state),
-                "err": st.err.name if hasattr(st.err, "name") else str(st.err),
+                "state": getattr(st.state, "name", str(st.state)),
+                "err": getattr(st.err, "name", str(st.err)),
                 "last_fire_ms": str(st.last_fire_at_ms),
                 "width_ns": str(st.pulse_width_ns_actual),
                 "delay_us": str(st.delay_us_actual),
-                "output": (
-                    st.output.name if hasattr(st.output, "name") else str(st.output)
-                ),
+                "output": getattr(st.output, "name", str(st.output)),
             }
         )
 
@@ -656,8 +654,8 @@ class FaultycmdTUI(App[None]):
             return
         self.campaign_panel.set_summary(
             {
-                "state": st.state.name if hasattr(st.state, "name") else str(st.state),
-                "err": st.err.name if hasattr(st.err, "name") else str(st.err),
+                "state": getattr(st.state, "name", str(st.state)),
+                "err": getattr(st.err, "name", str(st.err)),
                 "step": f"{st.step_n}/{st.total_steps}",
                 "pushed": str(st.results_pushed),
                 "dropped": str(st.results_dropped),
