@@ -41,8 +41,22 @@ _EMFI_TRIGGERS = (
 )
 
 
+class _DictFormMixin:
+    """Shared from_dict/to_dict for the form-state dataclasses below."""
+
+    @classmethod
+    def from_dict(cls, d: dict):
+        # Filter unknown keys + fill defaults for missing.
+        known = {f.name for f in fields(cls)}
+        kwargs = {k: v for k, v in d.items() if k in known}
+        return cls(**kwargs)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
 @dataclass
-class EmfiFormState:
+class EmfiFormState(_DictFormMixin):
     trigger: str = "immediate"
     delay_us: int = 0
     width_us: int = 5
@@ -51,16 +65,6 @@ class EmfiFormState:
     # external trigger before reporting CROWBAR_ERR_TRIGGER_TIMEOUT.
     # 0 = wait forever (firmware semantics, see emfi_campaign.c).
     trigger_timeout_ms: int = 60000
-
-    @classmethod
-    def from_dict(cls, d: dict) -> EmfiFormState:
-        # Filter unknown keys + fill defaults for missing.
-        known = {f.name for f in fields(cls)}
-        kwargs = {k: v for k, v in d.items() if k in known}
-        return cls(**kwargs)
-
-    def to_dict(self) -> dict:
-        return asdict(self)
 
     def validate(self) -> None:
         if self.trigger not in _EMFI_TRIGGERS:
@@ -359,21 +363,12 @@ def parse_triplet(s: str) -> tuple[int, int, int]:
 
 
 @dataclass
-class CampaignFormState:
+class CampaignFormState(_DictFormMixin):
     engine: str = "crowbar"
     delay: str = "1000:3000:1000"  # µs (text triplet, parsed on validate)
     width: str = "200:300:100"  # ns for crowbar, µs for emfi
     power: str = "1:1:0"  # crowbar 1=LP / 2=HP
     settle_ms: int = 50
-
-    @classmethod
-    def from_dict(cls, d: dict) -> CampaignFormState:
-        known = {f.name for f in fields(cls)}
-        kwargs = {k: v for k, v in d.items() if k in known}
-        return cls(**kwargs)
-
-    def to_dict(self) -> dict:
-        return asdict(self)
 
     def parse(
         self,
@@ -568,7 +563,7 @@ _CROWBAR_OUTPUTS = ("lp", "hp")  # NONE excluded — form must pick a real path
 
 
 @dataclass
-class CrowbarFormState:
+class CrowbarFormState(_DictFormMixin):
     trigger: str = "immediate"
     output: str = "lp"
     delay_us: int = 0
@@ -577,15 +572,6 @@ class CrowbarFormState:
     # external trigger before reporting CROWBAR_ERR_TRIGGER_TIMEOUT.
     # 0 = wait forever (firmware semantics, see crowbar_campaign.c).
     trigger_timeout_ms: int = 60000
-
-    @classmethod
-    def from_dict(cls, d: dict) -> CrowbarFormState:
-        known = {f.name for f in fields(cls)}
-        kwargs = {k: v for k, v in d.items() if k in known}
-        return cls(**kwargs)
-
-    def to_dict(self) -> dict:
-        return asdict(self)
 
     def validate(self) -> None:
         if self.trigger not in _CROWBAR_TRIGGERS:
@@ -772,20 +758,11 @@ class CrowbarControlModal(_StatusLineMixin, ModalScreen[None]):
 
 
 @dataclass
-class ScannerFormState:
+class ScannerFormState(_DictFormMixin):
     """No tunables for ``scan swd`` (the firmware drives the full
     P(8,2)=56 sweep with a fixed 30 s timeout). The dataclass is
     kept so the dashboard's persistence layer has something to
     serialize without raising KeyError on existing config files."""
-
-    @classmethod
-    def from_dict(cls, d: dict) -> ScannerFormState:
-        known = {f.name for f in fields(cls)}
-        kwargs = {k: v for k, v in d.items() if k in known}
-        return cls(**kwargs)
-
-    def to_dict(self) -> dict:
-        return asdict(self)
 
 
 class ScannerControlModal(_StatusLineMixin, ModalScreen[None]):
