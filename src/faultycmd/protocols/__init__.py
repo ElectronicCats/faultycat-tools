@@ -25,8 +25,7 @@ from .campaign import CampaignClient, CampaignError, CampaignResult, CampaignSta
 from .crowbar import CrowbarClient, CrowbarStatus
 from .emfi import EmfiClient, EmfiStatus
 from .scanner import (
-    I2cLaCapture,
-    UartLaCapture,
+    LaCapture,
     ScannerClient,
     ScannerError,
     parse_i2c_probe_ok,
@@ -46,8 +45,7 @@ __all__ = [
     "CrowbarStatus",
     "EmfiClient",
     "EmfiStatus",
-    "I2cLaCapture",
-    "UartLaCapture",
+    "LaCapture",
     "ScannerClient",
     "ScannerError",
     "parse_scan_swd_match",

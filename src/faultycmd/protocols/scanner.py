@@ -110,32 +110,19 @@ class ScannerError(Exception):
 
 
 @dataclass
-class I2cLaCapture:
-    """Raw logic-analyzer capture from ``i2c la``.
+class LaCapture:
+    """Raw logic-analyzer capture from the protocol-agnostic ``la`` command.
 
-    ``samples`` is one byte per sample, bit0=SDA bit1=SCL (1=high,
-    0=low); there's no per-sample timestamp — sample ``i`` occurred
-    at ``i * interval_us``. See
-    ``faultycat-firmware/services/i2c_core/i2c_la.h``.
+    The firmware always snapshots the full 8-channel bank GP0..GP7 and
+    streams the raw bytes verbatim — it never interprets them (see
+    ``faultycat-firmware/docs/LOGIC_ANALYZER.md``). ``samples`` is one
+    byte per sample, each bit a channel (bit 0 = GP0 = CH0, bit 1 = GP1
+    = CH1, …; 1=high, 0=low). There's no per-sample timestamp — sample
+    ``i`` occurred at ``i * interval_us``. Which channel carries which
+    signal is purely a wiring convention; host-side decoders (I2C/UART/…)
+    interpret whichever channels the operator wired.
     """
 
-    sda_gp: int
-    scl_gp: int
-    interval_us: int
-    samples: bytes
-
-
-@dataclass
-class UartLaCapture:
-    """Raw logic-analyzer capture from ``uart la``.
-
-    ``samples`` is one byte per sample, each bit corresponds to
-    GP0..GP7 (bit 0 = GP0 = CH0, bit 1 = GP1 = CH1, …). Sample ``i``
-    occurred at ``i * interval_us``.
-    """
-
-    rx_gp: int
-    tx_gp: int
     interval_us: int
     samples: bytes
 
@@ -564,106 +551,155 @@ class ScannerClient:
             timeout=timeout_s,
         )
 
-    def i2c_la(
+    def _capture_la_stream(
         self,
-        sda: int,
-        scl: int,
-        interval_us: int,
-        max_samples: int,
-        timeout_s: float = 10.0,
-    ) -> I2cLaCapture:
-        """Capture a raw SDA/SCL trace via the firmware logic analyzer.
+        ser: _SerialLike,
+        cmd: str,
+        prefix: str,
+        ok_re: re.Pattern[str],
+        binary: bool,
+        timeout_s: float,
+        label: str,
+    ) -> tuple[re.Match[str], bytes]:
+        """Shared reader for the ``la`` raw-capture command.
 
-        Unlike every other command on this client, the reply has two
-        parts: one ``I2C:`` summary line (filtered the usual way),
-        then a hexdump of the samples emitted *without* the ``I2C:``
-        prefix (see module docstring / firmware
-        ``main.c::cmd_i2c_la``). ``send_line``/``send_line_collect``
-        would silently drop those hex lines, so this reads the raw
-        stream itself once ``stream n=`` from the summary tells it
-        exactly how many hex characters to expect — a deterministic
-        stop condition, unlike the quiet-period heuristic used for
-        variable-length replies like ``scan_i2c``.
+        Sends `cmd`, waits for the one `prefix` summary line (filtered the
+        usual way), then reads exactly the sample count promised by that
+        line's ``stream n=`` field off the raw stream that follows it —
+        without the `prefix` (see module docstring / firmware
+        ``main.c::cmd_la``). ``send_line``/
+        ``send_line_collect`` would silently drop those lines, so this
+        reads the raw stream itself; the sample count gives a
+        deterministic stop condition, unlike the quiet-period heuristic
+        used for variable-length replies like ``scan_i2c``.
+
+        `binary` selects the wire format: raw sample bytes (1 byte/sample,
+        firmware's ``bin`` argument) instead of a hex dump (2 chars/
+        sample, the default) — halves the bytes-on-wire, which matters at
+        fast ``--interval-us`` where USB CDC throughput is the limiting
+        factor, not the firmware's capture ring. `label` is used in error
+        messages only.
         """
-        max_samples = min(max_samples, 8192)
-        ser = self._require_serial()
         ser.reset_input_buffer()
-        ser.write(f"i2c la {sda} {scl} {interval_us} {max_samples}\r\n".encode())
+        ser.write(f"{cmd}\r\n".encode())
         start = time.time()
         deadline = start + timeout_s
 
-        buf = ""
+        raw = b""
         summary_line: str | None = None
         while time.time() < deadline:
             chunk = ser.read(64)
             if not chunk:
                 continue
-            buf += chunk.decode(errors="replace")
-            while "\n" in buf:
-                line_text, _, buf = buf.partition("\n")
-                stripped = line_text.strip()
-                if stripped.startswith("I2C:"):
+            raw += chunk
+            while b"\n" in raw:
+                line_bytes, _, raw = raw.partition(b"\n")
+                stripped = line_bytes.decode(errors="replace").strip()
+                if stripped.startswith(prefix):
                     summary_line = stripped
                     break
             if summary_line is not None:
                 break
         if summary_line is None:
             raise TimeoutError(
-                f"i2c la sda=GP{sda} scl=GP{scl}: no I2C: summary line within "
-                f"{timeout_s:.1f}s (device unresponsive or wrong pins?)"
+                f"{label}: no {prefix} summary line within {timeout_s:.1f}s "
+                "(device unresponsive or wrong pins?)"
             )
         if " ERR " in f" {summary_line} ":
             raise ScannerError(summary_line)
 
-        m = _I2C_LA_OK_RE.search(summary_line)
+        m = ok_re.search(summary_line)
         if m is None:
             raise ScannerError(summary_line)
-        sda_gp = int(m.group("sda"))
-        scl_gp = int(m.group("scl"))
         n_samples = int(m.group("samples"))
-        reply_interval_us = int(m.group("interval_us"))
+        needed = n_samples if binary else n_samples * 2
 
-        needed = n_samples * 2
-        hex_chars = [c for c in buf if c in _HEX_DIGITS]
-        truncated = "TRUNC" in buf
-        while len(hex_chars) < needed and not truncated and time.time() < deadline:
-            chunk = ser.read(64)
-            if not chunk:
-                continue
-            text = chunk.decode(errors="replace")
-            if "TRUNC" in text:
-                truncated = True
-            hex_chars.extend(c for c in text if c in _HEX_DIGITS)
-        if len(hex_chars) < needed:
+        if binary:
+            data = bytearray(raw)
+            while (
+                len(data) < needed and b"TRUNC" not in data and time.time() < deadline
+            ):
+                chunk = ser.read(64)
+                if chunk:
+                    data.extend(chunk)
+            truncated = b"TRUNC" in data
+            got = len(data)
+        else:
+            text_tail = raw.decode(errors="replace")
+            hex_chars = [c for c in text_tail if c in _HEX_DIGITS]
+            truncated = "TRUNC" in text_tail
+            while len(hex_chars) < needed and not truncated and time.time() < deadline:
+                chunk = ser.read(64)
+                if not chunk:
+                    continue
+                text = chunk.decode(errors="replace")
+                if "TRUNC" in text:
+                    truncated = True
+                hex_chars.extend(c for c in text if c in _HEX_DIGITS)
             got = len(hex_chars)
+
+        if got < needed:
             elapsed = time.time() - start
             pct = 100.0 * got / needed
+            unit = "bytes" if binary else "hex chars"
             if truncated:
                 raise ScannerError(
-                    f"i2c la sda=GP{sda} scl=GP{scl}: firmware promised "
-                    f"{n_samples} samples ({needed} hex chars) but gave up "
-                    f"after sending only {got} ({pct:.0f}%) — the host wasn't "
-                    "draining the USB CDC buffer fast enough; retry or try "
-                    "fewer --samples"
+                    f"{label}: firmware promised {n_samples} samples "
+                    f"({needed} {unit}) but gave up after sending only "
+                    f"{got} ({pct:.0f}%) — the host wasn't draining the USB "
+                    "CDC buffer fast enough; retry or try fewer --samples"
                 )
             raise TimeoutError(
-                f"i2c la sda=GP{sda} scl=GP{scl}: firmware promised "
-                f"{n_samples} samples ({needed} hex chars) but only {got} "
-                f"({pct:.0f}%) arrived in {elapsed:.1f}s of {timeout_s:.1f}s "
-                "budget — hexdump transfer stalled or was truncated; retry, "
-                "try fewer --samples, or increase --timeout-s"
+                f"{label}: firmware promised {n_samples} samples "
+                f"({needed} {unit}) but only {got} ({pct:.0f}%) arrived in "
+                f"{elapsed:.1f}s of {timeout_s:.1f}s budget — transfer "
+                "stalled or was truncated; retry, try fewer --samples, or "
+                "increase --timeout-s"
             )
-        samples = bytes.fromhex("".join(hex_chars[:needed]))
-        return I2cLaCapture(
-            sda_gp=sda_gp,
-            scl_gp=scl_gp,
-            interval_us=reply_interval_us,
+
+        samples = (
+            bytes(data[:needed])
+            if binary
+            else bytes.fromhex("".join(hex_chars[:needed]))
+        )
+        return m, samples
+
+    def la(
+        self,
+        interval_us: int,
+        max_samples: int,
+        timeout_s: float = 10.0,
+        binary: bool = False,
+    ) -> LaCapture:
+        """Capture a raw GP0..GP7 trace via the firmware logic analyzer.
+
+        Protocol-agnostic: the firmware always samples the full
+        8-channel bank and never interprets it (see
+        ``faultycat-firmware/docs/LOGIC_ANALYZER.md``). See
+        ``_capture_la_stream`` for the reply-framing details and the
+        meaning of `binary`.
+        """
+        ser = self._require_serial()
+        cmd = f"la {interval_us} {max_samples}"
+        if binary:
+            cmd += " bin"
+        m, samples = self._capture_la_stream(
+            ser,
+            cmd,
+            "LA:",
+            _LA_OK_RE,
+            binary,
+            timeout_s,
+            label=f"la {interval_us}us n={max_samples}",
+        )
+        return LaCapture(
+            interval_us=int(m.group("interval_us")),
             samples=samples,
         )
 
-    def i2c_la_sump_arm(self, sda: int, scl: int) -> str:
-        """Arm the firmware's SUMP/OLS mode on ``sda``/``scl`` for a
-        PulseView/sigrok ("ols" driver) capture.
+    def la_sump_arm(self) -> str:
+        """Arm the firmware's SUMP/OLS mode for a PulseView/sigrok
+        ("ols" driver) capture of the full GP0..GP7 bank.
 
         Unlike every other command on this client, the caller is
         expected to close this connection (the ``with`` block) right
@@ -691,119 +727,7 @@ class ScannerClient:
         it; forcing ``dtr = True`` here first is a no-cost best-effort
         extra that can't hurt and may help on some Windows CDC stacks.
         """
-        reply = self._expect_ok("I2C:", f"i2c la sump enter {sda} {scl}")
-        _disable_hupcl(self._ser)
-        if self._ser is not None:
-            try:
-                self._ser.dtr = True  # type: ignore[attr-defined]
-            except Exception:
-                pass
-        return reply
-
-    def uart_la(
-        self,
-        rx: int,
-        tx: int,
-        interval_us: int,
-        max_samples: int,
-        timeout_s: float = 10.0,
-    ) -> UartLaCapture:
-        """Capture a raw RX/TX trace via the firmware logic analyzer.
-
-        Reply has two parts: one ``UART:`` summary line, then a hexdump
-        of the samples emitted without the ``UART:`` prefix (same
-        streaming format as ``i2c la``). The ``stream n=`` field in the
-        summary gives the deterministic sample count so the receiver
-        knows exactly how many hex characters to expect.
-        """
-        max_samples = min(max_samples, 8192)
-        ser = self._require_serial()
-        ser.reset_input_buffer()
-        ser.write(f"uart la {rx} {tx} {interval_us} {max_samples}\r\n".encode())
-        start = time.time()
-        deadline = start + timeout_s
-
-        buf = ""
-        summary_line: str | None = None
-        while time.time() < deadline:
-            chunk = ser.read(64)
-            if not chunk:
-                continue
-            buf += chunk.decode(errors="replace")
-            while "\n" in buf:
-                line_text, _, buf = buf.partition("\n")
-                stripped = line_text.strip()
-                if stripped.startswith("UART:"):
-                    summary_line = stripped
-                    break
-            if summary_line is not None:
-                break
-        if summary_line is None:
-            raise TimeoutError(
-                f"uart la rx=GP{rx} tx=GP{tx}: no UART: summary line within "
-                f"{timeout_s:.1f}s (device unresponsive or wrong pins?)"
-            )
-        if " ERR " in f" {summary_line} ":
-            raise ScannerError(summary_line)
-
-        m = _UART_LA_OK_RE.search(summary_line)
-        if m is None:
-            raise ScannerError(summary_line)
-        rx_gp = int(m.group("rx"))
-        tx_gp = int(m.group("tx"))
-        n_samples = int(m.group("samples"))
-        reply_interval_us = int(m.group("interval_us"))
-
-        needed = n_samples * 2
-        hex_chars = [c for c in buf if c in _HEX_DIGITS]
-        truncated = "TRUNC" in buf
-        while len(hex_chars) < needed and not truncated and time.time() < deadline:
-            chunk = ser.read(64)
-            if not chunk:
-                continue
-            text = chunk.decode(errors="replace")
-            if "TRUNC" in text:
-                truncated = True
-            hex_chars.extend(c for c in text if c in _HEX_DIGITS)
-        if len(hex_chars) < needed:
-            got = len(hex_chars)
-            elapsed = time.time() - start
-            pct = 100.0 * got / needed
-            if truncated:
-                raise ScannerError(
-                    f"uart la rx=GP{rx} tx=GP{tx}: firmware promised "
-                    f"{n_samples} samples ({needed} hex chars) but gave up "
-                    f"after sending only {got} ({pct:.0f}%) — the host wasn't "
-                    "draining the USB CDC buffer fast enough; retry or try "
-                    "fewer --samples"
-                )
-            raise TimeoutError(
-                f"uart la rx=GP{rx} tx=GP{tx}: firmware promised "
-                f"{n_samples} samples ({needed} hex chars) but only {got} "
-                f"({pct:.0f}%) arrived in {elapsed:.1f}s of {timeout_s:.1f}s "
-                "budget — hexdump transfer stalled or was truncated; retry, "
-                "try fewer --samples, or increase --timeout-s"
-            )
-        samples = bytes.fromhex("".join(hex_chars[:needed]))
-        return UartLaCapture(
-            rx_gp=rx_gp,
-            tx_gp=tx_gp,
-            interval_us=reply_interval_us,
-            samples=samples,
-        )
-
-    def uart_la_sump_arm(self, rx: int, tx: int) -> str:
-        """Arm the firmware's SUMP/OLS mode on ``rx``/``tx`` for a
-        PulseView/sigrok ("ols" driver) capture.
-
-        Caller should close this connection right after this returns —
-        every byte on this CDC is owned by the binary SUMP parser until
-        the host drops DTR. PulseView/sigrok-cli must open the *same*
-        port next. HUPCL is cleared so DTR stays asserted across the
-        close (POSIX only; on Windows the firmware's disconnect debounce
-        provides the grace window instead).
-        """
-        reply = self._expect_ok("UART:", f"uart la sump enter {rx} {tx}")
+        reply = self._expect_ok("LA:", "la sump enter")
         _disable_hupcl(self._ser)
         if self._ser is not None:
             try:
@@ -865,18 +789,12 @@ _I2C_PROBE_OK_RE = re.compile(
 )
 _I2C_ADDR_RE = re.compile(r"\baddr=0x(?P<addr>[0-9A-Fa-f]{2})\b")
 
-# `i2c la` summary line (apps/faultycat_fw/main.c::cmd_i2c_la):
-#     I2C: LA OK sda=GP<n> scl=GP<n> stream n=<n> interval_us=<n>
-_I2C_LA_OK_RE = re.compile(
-    r"\bsda=GP(?P<sda>\d+)\s+scl=GP(?P<scl>\d+)\s+stream\s+n=(?P<samples>\d+)"
-    r"\s+interval_us=(?P<interval_us>\d+)\b",
-    re.IGNORECASE,
-)
-# `uart la` summary line (apps/faultycat_fw/main.c::cmd_uart_la):
-#     UART: LA OK rx=GP<n> tx=GP<n> stream n=<n> interval_us=<n>
-_UART_LA_OK_RE = re.compile(
-    r"\brx=GP(?P<rx>\d+)\s+tx=GP(?P<tx>\d+)\s+stream\s+n=(?P<samples>\d+)"
-    r"\s+interval_us=(?P<interval_us>\d+)\b",
+# `la` summary line (apps/faultycat_fw/main.c::cmd_la):
+#     LA: OK capture ch=GP0..GP7 stream n=<n> interval_us=<n>
+# Protocol-agnostic — always the full GP0..GP7 bank, so there are no
+# per-pin fields (see faultycat-firmware/docs/LOGIC_ANALYZER.md).
+_LA_OK_RE = re.compile(
+    r"\bstream\s+n=(?P<samples>\d+)\s+interval_us=(?P<interval_us>\d+)\b",
     re.IGNORECASE,
 )
 _HEX_DIGITS = "0123456789abcdefABCDEF"
@@ -947,8 +865,7 @@ def _parse_int_after(line: str, marker: str) -> int | None:
 
 __all__ = [
     "ACCEPTED_PREFIXES",
-    "I2cLaCapture",
-    "UartLaCapture",
+    "LaCapture",
     "ScannerClient",
     "ScannerError",
     "parse_scan_swd_match",

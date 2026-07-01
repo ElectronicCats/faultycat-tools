@@ -17,6 +17,7 @@ Top-level command groups mirror the firmware's CDC layout:
     faultycmd scanner   (F8-2 ``scan swd`` over CDC2 text shell)
     faultycmd i2c       (I2C scan/probe over the same CDC2 text shell)
     faultycmd uart      (Target UART passthrough: CDC2 control + CDC3 data)
+    faultycmd la        (Protocol-agnostic logic analyzer over CDC2)
     faultycmd tui       (F10-5 Textual dashboard)
     faultycmd devices   (USB enumeration helper)
 
@@ -63,8 +64,9 @@ from ..protocols import (
 )
 from ..protocols.crowbar import CrowbarOutput, CrowbarTrigger
 from ..protocols.emfi import EmfiTrigger
-from ..protocols.i2c_decode import decode_i2c, samples_to_vcd
-from ..protocols.uart_decode import decode_uart, samples_to_vcd_uart
+from ..protocols.i2c_decode import decode_i2c
+from ..protocols.uart_decode import decode_uart
+from ..protocols.la_decode import samples_to_vcd
 from .usb import PortDiscoveryError, discover
 from ..utils.version_check import VersionMismatchError, set_allow_mismatch
 from ..utils.output import (
@@ -923,173 +925,6 @@ def i2c_probe(
             console.print(line)
 
 
-@i2c.command("la")
-@click.argument("sda", type=int, required=False, default=None)
-@click.argument("scl", type=int, required=False, default=None)
-@click.option(
-    "--scan-timeout-s",
-    type=float,
-    default=30.0,
-    show_default=True,
-    help="Max time for the auto-discovery `i2c scan` (only used if SDA/SCL are omitted).",
-)
-@click.option(
-    "--interval-us",
-    type=int,
-    default=2,
-    show_default=True,
-    help="Sample interval in microseconds.",
-)
-@click.option(
-    "--samples",
-    "n",
-    type=int,
-    default=2048,
-    show_default=True,
-    help="Max samples to capture (clamped to 8192, the firmware buffer size).",
-)
-@click.option(
-    "--decode/--no-decode",
-    default=True,
-    show_default=True,
-    help="Decode the capture into START/STOP/BYTE/ACK/NACK events.",
-)
-@click.option(
-    "--vcd",
-    "vcd_path",
-    type=click.Path(dir_okay=False, writable=True),
-    default=None,
-    help="Export the raw capture to a VCD file (GTKWave/PulseView/sigrok).",
-)
-@click.option(
-    "--timeout-s",
-    type=float,
-    default=10.0,
-    show_default=True,
-    help="Max capture time in seconds.",
-)
-@click.pass_context
-def i2c_la(
-    ctx: click.Context,
-    sda: int | None,
-    scl: int | None,
-    scan_timeout_s: float,
-    interval_us: int,
-    n: int,
-    decode: bool,
-    vcd_path: str | None,
-    timeout_s: float,
-) -> None:
-    """Capture a raw SDA/SCL trace with the firmware logic analyzer.
-
-    SDA/SCL can be omitted — I2C has no fixed pin pair (any of the 8
-    scanner-header channels can carry SDA/SCL), so when they're
-    omitted this runs a full `i2c scan` first to find them.
-    """
-    with _i2c_client(ctx) as cli:
-        sda, scl = _resolve_i2c_pins(cli, sda, scl, timeout_s=scan_timeout_s)
-        cap = cli.i2c_la(sda, scl, interval_us, n, timeout_s=timeout_s)
-    print_success(
-        f"{len(cap.samples)} samples @ {cap.interval_us}us "
-        f"(sda=GP{cap.sda_gp} scl=GP{cap.scl_gp})"
-    )
-
-    if vcd_path:
-        Path(vcd_path).write_text(
-            samples_to_vcd(cap.samples, cap.interval_us, cap.sda_gp, cap.scl_gp)
-        )
-        print_success(f"VCD written -> {vcd_path}")
-
-    if decode:
-        events = decode_i2c(cap.samples, cap.interval_us)
-        table = Table(title=f"I2C events ({len(events)})", box=box.ROUNDED)
-        table.add_column("t_us", justify="right")
-        table.add_column("kind", style=STYLES["device"])
-        table.add_column("value", justify="right")
-        for event in events:
-            value = "" if event.value is None else f"0x{event.value:02x}"
-            table.add_row(f"{event.t_us:.1f}", event.kind, value)
-        console.print(table)
-
-
-@i2c.command("la-sump-arm")
-@click.argument("sda", type=int, required=False, default=None)
-@click.argument("scl", type=int, required=False, default=None)
-@click.option(
-    "--scan-timeout-s",
-    type=float,
-    default=30.0,
-    show_default=True,
-    help="Max time for the auto-discovery `i2c scan` (only used if SDA/SCL are omitted).",
-)
-@click.option(
-    "--pulseview/--no-pulseview",
-    "open_pulseview",
-    default=True,
-    help="Launch PulseView on this port after arming (default: on).",
-)
-@click.pass_context
-def i2c_la_sump_arm(
-    ctx: click.Context,
-    sda: int | None,
-    scl: int | None,
-    scan_timeout_s: float,
-    open_pulseview: bool,
-) -> None:
-    """Arm the firmware's SUMP/OLS mode for a live PulseView capture.
-
-    Sends `i2c la sump enter` and disconnects immediately — the
-    firmware then speaks the classic SUMP serial protocol on this same
-    port until the host drops DTR, which sigrok's stock "Openbench
-    Logic Sniffer" (ols) driver expects with no further setup. By
-    default this also launches PulseView on this same port right away;
-    pass --no-pulseview to skip that and open it yourself. On Windows
-    this close always drops DTR (see docs/WINDOWS_SUMP_DTR_ISSUE.md),
-    so the firmware now gives a ~60s grace period before reverting to
-    the text shell on disconnect — enough time to alt-tab to PulseView
-    and click "Scan for devices". If that window is exceeded, or
-    anything else touches the line first, this command must be run
-    again.
-
-    SDA/SCL can be omitted — I2C has no fixed pin pair (any of the 8
-    scanner-header channels can carry SDA/SCL), so when they're
-    omitted this runs a full `i2c scan` first to find them, before
-    arming SUMP mode.
-    """
-    with _i2c_client(ctx) as cli:
-        sda, scl = _resolve_i2c_pins(cli, sda, scl, timeout_s=scan_timeout_s)
-        reply = cli.i2c_la_sump_arm(sda, scl)
-        port = cli.port
-    print_success(reply)
-
-    if not open_pulseview:
-        print_warning(
-            "Open PulseView/sigrok-cli on this port NOW (driver: Openbench "
-            "Logic Sniffer / ols) — closing or reopening the port before "
-            "that drops DTR and reverts the firmware to the text shell."
-        )
-        return
-
-    from .pipes import get_pulseview_path
-
-    pulseview_path = get_pulseview_path()
-    if pulseview_path is None:
-        print_warning(
-            "PulseView not found — open it manually NOW (driver: "
-            "Openbench Logic Sniffer / ols, port: "
-            f"{port}) before anything else touches this port."
-        )
-        return
-
-    subprocess.Popen(
-        [str(pulseview_path), "-d", f"ols:conn={port}"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    print_success(f"PulseView launched on {port} (driver: ols)")
-
-
 # -----------------------------------------------------------------------------
 # `uart` (Target UART passthrough)
 #
@@ -1179,159 +1014,6 @@ def uart_stopbits(ctx: click.Context, value: str) -> None:
     with _uart_control_client(ctx) as cli:
         reply = cli.uart_set_stopbits(int(value))
     print_success(reply)
-
-
-@uart.command("la")
-@click.argument("rx", type=int, required=False, default=0)
-@click.argument("tx", type=int, required=False, default=1)
-@click.option(
-    "--baud",
-    type=int,
-    default=115200,
-    show_default=True,
-    help="UART baud rate for --decode.",
-)
-@click.option(
-    "--interval-us",
-    "interval_us",
-    type=int,
-    default=2,
-    show_default=True,
-    help="Sample interval in µs.",
-)
-@click.option(
-    "--samples",
-    "n_samples",
-    type=int,
-    default=2048,
-    show_default=True,
-    help="Max samples to capture.",
-)
-@click.option(
-    "--decode/--no-decode",
-    "do_decode",
-    default=True,
-    help="Decode raw samples into UART frames (default: on).",
-)
-@click.option(
-    "--vcd", "vcd_path", default=None, help="Export raw capture to a VCD file."
-)
-@click.option(
-    "--timeout-s",
-    type=float,
-    default=10.0,
-    show_default=True,
-    help="Capture timeout in seconds.",
-)
-@click.pass_context
-def uart_la(
-    ctx: click.Context,
-    rx: int,
-    tx: int,
-    baud: int,
-    interval_us: int,
-    n_samples: int,
-    do_decode: bool,
-    vcd_path: str | None,
-    timeout_s: float,
-) -> None:
-    """Capture a raw RX/TX logic trace (GP0=RX, GP1=TX by default).
-
-    Records all 8 scanner-header pins simultaneously at --interval-us µs
-    per sample. Use --decode to decode the RX channel into UART frames,
-    or --vcd to export the raw capture for PulseView/GTKWave.
-    """
-    spb = (1_000_000 / baud) / interval_us
-    if spb < 4:
-        print_warning(
-            f"Oversampling ratio is {spb:.1f}× (< 4×) — decoding may be "
-            "unreliable. Reduce --interval-us or lower --baud."
-        )
-    with _uart_control_client(ctx) as cli:
-        cap = cli.uart_la(rx, tx, interval_us, n_samples, timeout_s=timeout_s)
-    print_success(
-        f"{len(cap.samples)} samples @ {cap.interval_us}µs "
-        f"(rx=GP{cap.rx_gp} tx=GP{cap.tx_gp})"
-    )
-    if vcd_path is not None:
-        Path(vcd_path).write_text(
-            samples_to_vcd_uart(cap.samples, cap.interval_us, cap.rx_gp, cap.tx_gp)
-        )
-        print_success(f"VCD written to {vcd_path}")
-    if do_decode:
-        frames = decode_uart(cap.samples, cap.interval_us, rx_bit=cap.rx_gp, baud=baud)
-        if not frames:
-            print_info("No UART frames decoded.")
-            return
-        table = Table(
-            box=box.SIMPLE, show_header=True, header_style=STYLES["highlight"]
-        )
-        table.add_column("t_us", justify="right")
-        table.add_column("hex", justify="center")
-        table.add_column("ASCII", justify="center")
-        table.add_column("framing_error")
-        for fr in frames:
-            ascii_ch = chr(fr.byte) if 0x20 <= fr.byte < 0x7F else "·"
-            fe_str = "[red]FE[/red]" if fr.framing_error else ""
-            table.add_row(f"{fr.t_us:.1f}", f"{fr.byte:02X}", ascii_ch, fe_str)
-        console.print(table)
-
-
-@uart.command("la-sump-arm")
-@click.argument("rx", type=int, required=False, default=0)
-@click.argument("tx", type=int, required=False, default=1)
-@click.option(
-    "--pulseview/--no-pulseview",
-    "open_pulseview",
-    default=True,
-    help="Launch PulseView after arming (default: on).",
-)
-@click.pass_context
-def uart_la_sump_arm(
-    ctx: click.Context,
-    rx: int,
-    tx: int,
-    open_pulseview: bool,
-) -> None:
-    """Arm the firmware's SUMP/OLS mode for a live PulseView capture.
-
-    Sends `uart la sump enter` and disconnects immediately — the firmware
-    then speaks the SUMP protocol on this same port until the host drops
-    DTR. RX defaults to GP0 (CH0) and TX defaults to GP1 (CH1). By
-    default also launches PulseView on this same port right away; pass
-    --no-pulseview to skip that and open it yourself.
-    """
-    with _uart_control_client(ctx) as cli:
-        reply = cli.uart_la_sump_arm(rx, tx)
-        port = cli.port
-    print_success(reply)
-
-    if not open_pulseview:
-        print_warning(
-            "Open PulseView/sigrok-cli on this port NOW (driver: Openbench "
-            "Logic Sniffer / ols) — closing or reopening the port before "
-            "that drops DTR and reverts the firmware to the text shell."
-        )
-        return
-
-    from .pipes import get_pulseview_path
-
-    pulseview_path = get_pulseview_path()
-    if pulseview_path is None:
-        print_warning(
-            "PulseView not found — open it manually NOW (driver: "
-            "Openbench Logic Sniffer / ols, port: "
-            f"{port}) before anything else touches this port."
-        )
-        return
-
-    subprocess.Popen(
-        [str(pulseview_path), "-d", f"ols:conn={port}"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    print_success(f"PulseView launched on {port} (driver: ols)")
 
 
 @uart.command("console")
@@ -1448,6 +1130,229 @@ def uart_console(
                 raise click.ClickException(
                     f"Target UART disconnected: {disconnect_error[0]}"
                 )
+
+
+# -----------------------------------------------------------------------------
+# `la` (protocol-agnostic logic analyzer)
+#
+# Captures the full GP0..GP7 bank verbatim over the CDC2 text shell — the
+# firmware never interprets the channels (see
+# faultycat-firmware/docs/LOGIC_ANALYZER.md). A "protocol" is nothing more
+# than a wiring convention plus the decoder you pick: on-device with
+# `--decode i2c|uart`, or host-side in PulseView/sigrok via `la pulseview`.
+# Any digital signal wired onto GP0..GP7 is fair game — not just UART/I2C.
+# -----------------------------------------------------------------------------
+
+
+@main.group()
+@click.option("--port", default=None, help="Override the scanner control port (CDC2).")
+@click.pass_context
+def la(ctx: click.Context, port: str | None) -> None:
+    """Protocol-agnostic logic analyzer (captures GP0..GP7)."""
+    ctx.obj = port
+
+
+def _la_client(ctx: click.Context) -> ScannerClient:
+    port = ctx.obj
+    return ScannerClient(port) if port is not None else ScannerClient.discover()
+
+
+@la.command("capture")
+@click.option(
+    "--interval-us",
+    "interval_us",
+    type=int,
+    default=2,
+    show_default=True,
+    help="Sample interval in microseconds.",
+)
+@click.option(
+    "--samples",
+    "n",
+    type=int,
+    default=2048,
+    show_default=True,
+    help="Max samples to capture (firmware hard ceiling: 262144, the SUMP/OLS "
+    "readcount limit).",
+)
+@click.option(
+    "--binary/--hex",
+    "binary",
+    default=False,
+    show_default=True,
+    help="Stream raw sample bytes instead of a hexdump — halves USB bytes-on-"
+    "wire, useful at fast --interval-us.",
+)
+@click.option(
+    "--decode",
+    type=click.Choice(["none", "i2c", "uart"]),
+    default="none",
+    show_default=True,
+    help="Optionally decode the capture on-device: i2c (SDA/SCL) or uart (RX).",
+)
+@click.option(
+    "--sda",
+    type=int,
+    default=0,
+    show_default=True,
+    help="I2C SDA channel (--decode i2c).",
+)
+@click.option(
+    "--scl",
+    type=int,
+    default=1,
+    show_default=True,
+    help="I2C SCL channel (--decode i2c).",
+)
+@click.option(
+    "--rx",
+    type=int,
+    default=0,
+    show_default=True,
+    help="UART RX channel (--decode uart).",
+)
+@click.option(
+    "--baud",
+    type=int,
+    default=115200,
+    show_default=True,
+    help="UART baud rate (--decode uart).",
+)
+@click.option(
+    "--vcd",
+    "vcd_path",
+    type=click.Path(dir_okay=False, writable=True),
+    default=None,
+    help="Export the raw GP0..GP7 capture to a VCD file (GTKWave/PulseView/sigrok).",
+)
+@click.option(
+    "--timeout-s",
+    type=float,
+    default=10.0,
+    show_default=True,
+    help="Max capture time in seconds.",
+)
+@click.pass_context
+def la_capture(
+    ctx: click.Context,
+    interval_us: int,
+    n: int,
+    binary: bool,
+    decode: str,
+    sda: int,
+    scl: int,
+    rx: int,
+    baud: int,
+    vcd_path: str | None,
+    timeout_s: float,
+) -> None:
+    """Capture a raw GP0..GP7 logic trace with the firmware logic analyzer.
+
+    Records all 8 scanner-header channels simultaneously at --interval-us µs
+    per sample. Export with --vcd for PulseView/GTKWave, or decode a wired
+    bus on-device with --decode i2c|uart (channels selected via
+    --sda/--scl or --rx).
+    """
+    if decode == "uart":
+        spb = (1_000_000 / baud) / interval_us
+        if spb < 4:
+            print_warning(
+                f"Oversampling ratio is {spb:.1f}× (< 4×) — decoding may be "
+                "unreliable. Reduce --interval-us or lower --baud."
+            )
+
+    with _la_client(ctx) as cli:
+        cap = cli.la(interval_us, n, timeout_s=timeout_s, binary=binary)
+    print_success(f"{len(cap.samples)} samples @ {cap.interval_us}µs (ch=GP0..GP7)")
+
+    if vcd_path is not None:
+        Path(vcd_path).write_text(samples_to_vcd(cap.samples, cap.interval_us))
+        print_success(f"VCD written -> {vcd_path}")
+
+    if decode == "i2c":
+        events = decode_i2c(cap.samples, cap.interval_us)
+        table = Table(title=f"I2C events ({len(events)})", box=box.ROUNDED)
+        table.add_column("t_us", justify="right")
+        table.add_column("kind", style=STYLES["device"])
+        table.add_column("value", justify="right")
+        for event in events:
+            value = "" if event.value is None else f"0x{event.value:02x}"
+            table.add_row(f"{event.t_us:.1f}", event.kind, value)
+        console.print(table)
+    elif decode == "uart":
+        frames = decode_uart(cap.samples, cap.interval_us, rx_bit=rx, baud=baud)
+        if not frames:
+            print_info("No UART frames decoded.")
+            return
+        table = Table(
+            box=box.SIMPLE, show_header=True, header_style=STYLES["highlight"]
+        )
+        table.add_column("t_us", justify="right")
+        table.add_column("hex", justify="center")
+        table.add_column("ASCII", justify="center")
+        table.add_column("framing_error")
+        for fr in frames:
+            ascii_ch = chr(fr.byte) if 0x20 <= fr.byte < 0x7F else "·"
+            fe_str = "[red]FE[/red]" if fr.framing_error else ""
+            table.add_row(f"{fr.t_us:.1f}", f"{fr.byte:02X}", ascii_ch, fe_str)
+        console.print(table)
+
+
+@la.command("pulseview")
+@click.option(
+    "--pulseview/--no-pulseview",
+    "open_pulseview",
+    default=True,
+    help="Launch PulseView on this port after arming (default: on).",
+)
+@click.pass_context
+def la_pulseview(ctx: click.Context, open_pulseview: bool) -> None:
+    """Arm the firmware's SUMP/OLS mode for a live PulseView capture.
+
+    Sends `la sump enter` and disconnects immediately — the firmware then
+    speaks the classic SUMP serial protocol on this same port until the
+    host drops DTR, which sigrok's stock "Openbench Logic Sniffer" (ols)
+    driver expects with no further setup. The full GP0..GP7 bank is
+    captured; pick the decoder you need (I2C/UART/SPI/…) inside PulseView.
+    By default this also launches PulseView on this same port right away;
+    pass --no-pulseview to skip that and open it yourself. On Windows this
+    close always drops DTR (see docs/WINDOWS_SUMP_DTR_ISSUE.md), so the
+    firmware gives a grace period before reverting to the text shell —
+    enough time to alt-tab to PulseView and click "Scan for devices". If
+    that window is exceeded, or anything else touches the line first, run
+    this command again.
+    """
+    with _la_client(ctx) as cli:
+        reply = cli.la_sump_arm()
+        port = cli.port
+    print_success(reply)
+
+    if not open_pulseview:
+        print_warning(
+            "Open PulseView/sigrok-cli on this port NOW (driver: Openbench "
+            "Logic Sniffer / ols) — closing or reopening the port before "
+            "that drops DTR and reverts the firmware to the text shell."
+        )
+        return
+
+    from .pipes import get_pulseview_path
+
+    pulseview_path = get_pulseview_path()
+    if pulseview_path is None:
+        print_warning(
+            "PulseView not found — open it manually NOW (driver: "
+            "Openbench Logic Sniffer / ols, port: "
+            f"{port}) before anything else touches this port."
+        )
+        return
+
+    subprocess.Popen(
+        [str(pulseview_path), "-d", f"ols:conn={port}"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    print_success(f"PulseView launched on {port} (driver: ols)")
 
 
 # -----------------------------------------------------------------------------
@@ -1668,7 +1573,7 @@ def _wrap_main() -> None:
         raise SystemExit(2) from e
     except TimeoutError as e:
         # Covers both the "no shell reply" and the partial-transfer
-        # timeouts (e.g. ScannerClient.i2c_la) — their messages already
+        # timeouts (e.g. ScannerClient.la) — their messages already
         # carry actionable hints, so just surface them as-is.
         print_error(str(e))
         raise SystemExit(2) from e

@@ -1,11 +1,12 @@
-"""I2C bus decoder for raw `i2c la` captures.
+"""I2C bus decoder for raw `la` captures.
 
 Pure stdlib, no serial port involved — works equally well on a live
-:class:`~faultycmd.protocols.scanner.I2cLaCapture` or on a previously
+:class:`~faultycmd.protocols.scanner.LaCapture` or on a previously
 saved hexdump, so it's split out of ``scanner.py``. Input is the same
-sample layout the firmware emits (``i2c_la.h``): one byte per sample,
-bit0=SDA bit1=SCL (1=high, 0=low), no per-sample timestamp — sample
-``i`` occurred at ``i * interval_us``.
+sample layout the firmware emits: one byte per sample, bit0=SDA
+bit1=SCL (1=high, 0=low), no per-sample timestamp — sample ``i``
+occurred at ``i * interval_us``. VCD export is protocol-agnostic and
+lives in :mod:`la_decode`; this module just decodes the SDA/SCL pair.
 """
 
 from __future__ import annotations
@@ -109,53 +110,4 @@ def decode_i2c(samples: bytes, interval_us: float) -> list[I2cEvent]:
     return events
 
 
-def samples_to_vcd(samples: bytes, interval_us: float, sda_gp: int, scl_gp: int) -> str:
-    """Render a raw capture as a plain-text VCD (no library needed).
-
-    Opens directly in GTKWave / PulseView / sigrok. Uses a 1us
-    timescale (matching ``interval_us``'s unit) and two 1-bit
-    signals, ``sda`` and ``scl``, identified by VCD codes ``!``/``"``.
-    """
-    lines = [
-        "$timescale 1us $end",
-        "$scope module i2c_la $end",
-        f"$var wire 1 ! sda_gp{sda_gp} $end",
-        f'$var wire 1 " scl_gp{scl_gp} $end',
-        "$upscope $end",
-        "$enddefinitions $end",
-    ]
-
-    if not samples:
-        lines.append("$dumpvars")
-        lines.append("x!")
-        lines.append('x"')
-        lines.append("$end")
-        return "\n".join(lines) + "\n"
-
-    first = samples[0]
-    prev_sda = first & _SDA_MASK
-    prev_scl = (first & _SCL_MASK) >> 1
-
-    lines.append("$dumpvars")
-    lines.append(f"{prev_sda}!")
-    lines.append(f'{prev_scl}"')
-    lines.append("$end")
-
-    for i in range(1, len(samples)):
-        sample = samples[i]
-        sda = sample & _SDA_MASK
-        scl = (sample & _SCL_MASK) >> 1
-        if sda == prev_sda and scl == prev_scl:
-            continue
-        lines.append(f"#{int(i * interval_us)}")
-        if sda != prev_sda:
-            lines.append(f"{sda}!")
-        if scl != prev_scl:
-            lines.append(f'{scl}"')
-        prev_sda = sda
-        prev_scl = scl
-
-    return "\n".join(lines) + "\n"
-
-
-__all__ = ["I2cEvent", "decode_i2c", "samples_to_vcd"]
+__all__ = ["I2cEvent", "decode_i2c"]

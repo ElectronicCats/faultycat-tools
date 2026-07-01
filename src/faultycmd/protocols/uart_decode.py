@@ -1,10 +1,12 @@
-"""UART bus decoder for raw ``uart la`` captures.
+"""UART bus decoder for raw ``la`` captures.
 
 Pure stdlib, no serial port involved — works equally well on a live
-:class:`~faultycmd.protocols.scanner.UartLaCapture` or on a previously
+:class:`~faultycmd.protocols.scanner.LaCapture` or on a previously
 saved hexdump. Input is the same sample layout the firmware emits: one
 byte per sample, each bit corresponds to GP0..GP7 (bit 0 = GP0 = CH0).
-Sample ``i`` occurred at ``i * interval_us``.
+Sample ``i`` occurred at ``i * interval_us``. VCD export is
+protocol-agnostic and lives in :mod:`la_decode`; this module just
+decodes whichever channel carries RX.
 """
 
 from __future__ import annotations
@@ -71,57 +73,4 @@ def decode_uart(
     return frames
 
 
-def samples_to_vcd_uart(
-    samples: bytes, interval_us: float, rx_gp: int, tx_gp: int
-) -> str:
-    """Render a raw UART capture as a plain-text VCD.
-
-    Opens directly in GTKWave / PulseView / sigrok. Uses a 1us
-    timescale and two 1-bit signals, ``rx`` and ``tx``.
-    """
-    rx_bit = rx_gp % 8
-    tx_bit = tx_gp % 8
-
-    lines = [
-        "$timescale 1us $end",
-        "$scope module uart_la $end",
-        f"$var wire 1 ! rx_gp{rx_gp} $end",
-        f'$var wire 1 " tx_gp{tx_gp} $end',
-        "$upscope $end",
-        "$enddefinitions $end",
-    ]
-
-    if not samples:
-        lines.append("$dumpvars")
-        lines.append("x!")
-        lines.append('x"')
-        lines.append("$end")
-        return "\n".join(lines) + "\n"
-
-    first = samples[0]
-    prev_rx = (first >> rx_bit) & 1
-    prev_tx = (first >> tx_bit) & 1
-
-    lines.append("$dumpvars")
-    lines.append(f"{prev_rx}!")
-    lines.append(f'{prev_tx}"')
-    lines.append("$end")
-
-    for i in range(1, len(samples)):
-        sample = samples[i]
-        rx_val = (sample >> rx_bit) & 1
-        tx_val = (sample >> tx_bit) & 1
-        if rx_val == prev_rx and tx_val == prev_tx:
-            continue
-        lines.append(f"#{int(i * interval_us)}")
-        if rx_val != prev_rx:
-            lines.append(f"{rx_val}!")
-        if tx_val != prev_tx:
-            lines.append(f'{tx_val}"')
-        prev_rx = rx_val
-        prev_tx = tx_val
-
-    return "\n".join(lines) + "\n"
-
-
-__all__ = ["UartFrame", "decode_uart", "samples_to_vcd_uart"]
+__all__ = ["UartFrame", "decode_uart"]
