@@ -171,11 +171,20 @@ class ScannerClient:
         Firmware emits ``SHELL: VERSION X.Y.Z.W``. Closes the serial
         on failure to keep the client in a consistent state.
 
-        A timeout here usually means the firmware is still parked in
-        the binary SUMP shell from a previous ``i2c la sump enter``
-        whose DTR was never dropped (e.g. PulseView never connected).
-        One DTR drop+reassert is the only thing that kicks it back to
-        the text shell, so try that once before giving up.
+        A timeout here usually means the firmware is still armed in
+        the binary SUMP shell from a previous ``la sump enter`` (see
+        ``la_sump_arm``). The firmware only reverts to the text shell
+        after a *continuous* 60s DTR-low disconnect (``SUMP_EXIT_GRACE_MS``
+        in the firmware's main.c) — and reopening this same port to run
+        this very probe is itself a reconnect that resets that
+        countdown (``la pulseview`` retries and ``faultycmd verify``
+        both do this). There used to be a DTR drop+reassert retry here
+        to kick a stuck firmware back to the shell, but with the 60s
+        grace window that pulse can never be long enough to trigger a
+        revert — it only cancels any countdown already in progress,
+        making a stuck port harder to recover from on repeated
+        retries. So don't retry; instead raise a specific, actionable
+        error instead of a bare TimeoutError.
         """
         from ..utils.version_check import (  # noqa: PLC0415 — avoid import cycle
             assert_version_match,
@@ -185,10 +194,16 @@ class ScannerClient:
         try:
             try:
                 line = self.send_line("version", accept_prefixes=("SHELL:",))
-            except TimeoutError:
-                if not self._toggle_dtr():
-                    raise
-                line = self.send_line("version", accept_prefixes=("SHELL:",))
+            except TimeoutError as e:
+                raise TimeoutError(
+                    "no shell reply for 'version' — the scanner port may still "
+                    "be armed in SUMP/PulseView mode from a previous `la "
+                    "pulseview` session. The firmware only reverts to the text "
+                    "shell ~60s after PulseView disconnects, and reopening this "
+                    "port (as this command just did) resets that countdown. "
+                    "Wait ~60s without opening the scanner port (including via "
+                    "`faultycmd verify`) and try again."
+                ) from e
             self.firmware_version = parse_shell_version(line)
             assert_version_match(self.firmware_version)
         except Exception:
@@ -196,22 +211,6 @@ class ScannerClient:
                 self._ser.close()
                 self._ser = None
             raise
-
-    def _toggle_dtr(self) -> bool:
-        """Drop then reassert DTR on the open serial handle.
-
-        Returns False if the underlying serial stand-in doesn't
-        support ``.dtr`` (e.g. test fakes), so the caller can fall
-        back to raising the original error.
-        """
-        ser = self._ser
-        if ser is None or not hasattr(ser, "dtr"):
-            return False
-        ser.dtr = False  # type: ignore[attr-defined]
-        time.sleep(0.1)
-        ser.dtr = True  # type: ignore[attr-defined]
-        time.sleep(0.3)
-        return True
 
     def close(self) -> None:
         if self._ser is not None:
