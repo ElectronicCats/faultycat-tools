@@ -155,3 +155,73 @@ next time (e.g. `/dev/ttyACM1` after a reconnect, or a different port
 on Windows/macOS), PulseView won't find a saved session for that path
 and opens a fresh, unconfigured one — repeat steps 2–3 once for that
 port.
+
+## 8. Sample rate: satisfying Nyquist, and the capture-window trade-off
+
+The firmware's hardware ceiling is a fixed **1 MHz** sample rate
+(reported via `METADATA_TOKEN_MAX_SAMPLE_RATE_HZ` in
+`faultycat-firmware/services/sump_ols/sump_ols.c`) and a fixed **16384
+samples** per capture (`SUMP_OLS_MAX_SAMPLES`,
+`faultycat-firmware/services/sump_ols/sump_ols.h`) — half the sampler's
+32 KB ring, kept lossless by capturing into the other half before
+streaming. Both PulseView's "Samplerate" dropdown and its "Samples"
+count map directly onto these two knobs.
+
+### Why the raw Nyquist minimum (2x) isn't enough
+
+The Nyquist rate (2x the signal frequency) is the bare minimum to
+reconstruct a *sine wave's* frequency — it says nothing about
+resolving *when an edge happened*, which is what a protocol decoder
+actually needs (UART's start bit, I2C's clock edges). Sampling right
+at 2x can land every sample on the same phase of the signal and miss
+transitions entirely. In practice, decoding a digital protocol
+reliably needs several samples per bit/clock period, not two per
+period:
+
+- **UART @ 115200 baud** — bit period ≈ 8.68 µs. Set PulseView's
+  samplerate to **500 kHz** (≈ 4.34 samples/bit) — the practical floor
+  for the decoder to place start/stop bit edges correctly; 230.4 kHz
+  (the literal 2x Nyquist minimum) is too marginal to trust.
+- **I2C fast-mode @ 400 kHz SCL** — clock period = 2.5 µs. Set
+  PulseView's samplerate to **1 MHz** (2.5 samples/cycle) — this is
+  also the firmware's hardware ceiling, so there's no headroom left to
+  go faster if a given bus turns out to need more margin.
+
+### The trade-off: higher sample rate = shorter capture window
+
+Because the sample count is capped at 16384 regardless of rate, a
+faster samplerate buys decode accuracy at the cost of a shorter time
+window:
+
+| Signal            | Samplerate | Capture window            | Roughly visible                  |
+|--------------------|-----------:|---------------------------|-----------------------------------|
+| UART @ 115200 baud | 500 kHz    | 16384 / 500 kHz ≈ 32.8 ms | ~375 bytes (8N1 framing)          |
+| I2C fast-mode 400 kHz | 1 MHz   | 16384 / 1 MHz ≈ 16.4 ms   | ~6550 SCL cycles (~725 bytes)     |
+
+If you need to observe more bytes/transactions than that, either the
+bus is too fast for this analyzer's ceiling to see the full exchange,
+or you need to isolate the interesting part of the capture with a
+trigger (below) instead of trying to capture everything from power-up.
+
+### Don't waste the window on silence — set a trigger
+
+A capture window of only 16–33 ms is easy to burn entirely on an idle
+bus if PulseView just starts sampling at a random moment. Configure a
+trigger so the window is centered on actual activity instead of empty
+line:
+
+1. In PulseView's channel list, click the small trigger icon on the
+   channel that starts the transaction you care about (e.g. the UART
+   RX line, or SDA/SCL for I2C) and pick an edge — **falling edge**
+   for UART (idle-high, falls at the start bit) or for an I2C start
+   condition on SDA.
+2. Adjust the **pre-trigger capture ratio** in the sampling toolbar so
+   part of the window is captured *before* the trigger fires — this is
+   what lets a UART decoder see the idle line preceding the first
+   start bit instead of misframing it. The firmware already guarantees
+   a minimum of `SUMP_OLS_PRETRIGGER_MIN` (32) samples of pre-trigger
+   history whenever any trigger is armed (see `sump_ols.h`), but a
+   larger PulseView-requested ratio wins over that floor.
+3. Click **Run** — the capture now waits for the trigger condition
+   before consuming its (short) sample budget, instead of streaming
+   16–33 ms of whatever the bus happened to be doing when you clicked.
