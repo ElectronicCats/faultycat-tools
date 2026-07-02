@@ -1303,24 +1303,29 @@ def la_capture(
     "--pulseview/--no-pulseview",
     "open_pulseview",
     default=True,
-    help="Launch PulseView on this port after arming (default: on).",
+    help="Launch PulseView on this port, wait for it to close, then "
+    "release the port back to the text shell (default: on).",
 )
 @click.pass_context
 def la_pulseview(ctx: click.Context, open_pulseview: bool) -> None:
     """Arm the firmware's SUMP/OLS mode for a live PulseView capture.
 
     Sends `la sump enter` and disconnects immediately — the firmware then
-    speaks the classic SUMP serial protocol on this same port until the
-    host drops DTR, which sigrok's stock "Openbench Logic Sniffer" (ols)
-    driver expects with no further setup. The full GP0..GP7 bank is
+    speaks the classic SUMP serial protocol on this same port until it's
+    explicitly released, which sigrok's stock "Openbench Logic Sniffer"
+    (ols) driver expects with no further setup. The full GP0..GP7 bank is
     captured; pick the decoder you need (I2C/UART/SPI/…) inside PulseView.
-    By default this also launches PulseView on this same port right away;
-    pass --no-pulseview to skip that and open it yourself. On Windows this
-    close always drops DTR (see docs/WINDOWS_SUMP_DTR_ISSUE.md), so the
-    firmware gives a grace period before reverting to the text shell —
-    enough time to alt-tab to PulseView and click "Scan for devices". If
-    that window is exceeded, or anything else touches the line first, run
-    this command again.
+
+    By default this also launches PulseView on this same port right away,
+    blocks until you close it, and then forces the firmware back to the
+    text shell (see ``ScannerClient.force_exit_sump`` — closing the port
+    normally isn't a reliable trigger for this on either Linux or
+    Windows, so this command does it explicitly instead of hoping for a
+    DTR drop). That release takes about a minute — the port stays
+    unusable by any other faultycmd command until it completes. Pass
+    --no-pulseview to skip launching/waiting and drive PulseView yourself;
+    in that case nothing releases the port automatically, so re-run this
+    command (with --no-pulseview) once you're done to force the release.
     """
     with _la_client(ctx) as cli:
         reply = cli.la_sump_arm()
@@ -1330,29 +1335,46 @@ def la_pulseview(ctx: click.Context, open_pulseview: bool) -> None:
     if not open_pulseview:
         print_warning(
             "Open PulseView/sigrok-cli on this port NOW (driver: Openbench "
-            "Logic Sniffer / ols) — closing or reopening the port before "
-            "that drops DTR and reverts the firmware to the text shell."
+            "Logic Sniffer / ols). Nothing will release the port "
+            "automatically — once you're done, run `faultycmd la "
+            "pulseview --no-pulseview` again to force it back to the "
+            "text shell."
         )
         return
 
     from .pipes import get_pulseview_path
 
     pulseview_path = get_pulseview_path()
+    proc = None
     if pulseview_path is None:
         print_warning(
             "PulseView not found — open it manually NOW (driver: "
             "Openbench Logic Sniffer / ols, port: "
-            f"{port}) before anything else touches this port."
+            f"{port}) before anything else touches this port. Once done, "
+            "this command will still release the port for you below."
         )
-        return
+    else:
+        proc = subprocess.Popen(
+            [str(pulseview_path), "-d", f"ols:conn={port}"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        print_success(f"PulseView launched on {port} (driver: ols)")
 
-    subprocess.Popen(
-        [str(pulseview_path), "-d", f"ols:conn={port}"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
+    print_info("Waiting for PulseView to close so this port can be released...")
+    if proc is not None:
+        proc.wait()
+    else:
+        click.pause("Press any key once you've closed PulseView...")
+
+    print_info(
+        f"Releasing {port} from SUMP mode (forcing a firmware-side "
+        f"disconnect, takes ~{int(ScannerClient.SUMP_EXIT_GRACE_S) + 5}s)..."
     )
-    print_success(f"PulseView launched on {port} (driver: ols)")
+    with ScannerClient(port, check_firmware_version=False) as release_cli:
+        release_cli.force_exit_sump()
+    print_success(f"{port} released back to the text shell.")
 
 
 # -----------------------------------------------------------------------------

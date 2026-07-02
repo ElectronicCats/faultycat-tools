@@ -173,18 +173,15 @@ class ScannerClient:
 
         A timeout here usually means the firmware is still armed in
         the binary SUMP shell from a previous ``la sump enter`` (see
-        ``la_sump_arm``). The firmware only reverts to the text shell
-        after a *continuous* 60s DTR-low disconnect (``SUMP_EXIT_GRACE_MS``
-        in the firmware's main.c) — and reopening this same port to run
-        this very probe is itself a reconnect that resets that
-        countdown (``la pulseview`` retries and ``faultycmd verify``
-        both do this). There used to be a DTR drop+reassert retry here
-        to kick a stuck firmware back to the shell, but with the 60s
-        grace window that pulse can never be long enough to trigger a
-        revert — it only cancels any countdown already in progress,
-        making a stuck port harder to recover from on repeated
-        retries. So don't retry; instead raise a specific, actionable
-        error instead of a bare TimeoutError.
+        ``la_sump_arm``) whose session was never cleanly released —
+        e.g. ``faultycmd la pulseview`` was killed before it could run
+        its own ``force_exit_sump()`` cleanup, or PulseView crashed.
+        Under normal use ``la pulseview`` handles the SUMP hand-off and
+        release itself, so hitting this means that cleanup didn't run;
+        the only reliable recovery left from here is a power cycle /
+        USB replug of the board (there is no in-band "poke" that's
+        both fast and guaranteed to work — see ``force_exit_sump`` for
+        why a quick DTR pulse can't do it).
         """
         from ..utils.version_check import (  # noqa: PLC0415 — avoid import cycle
             assert_version_match,
@@ -196,13 +193,13 @@ class ScannerClient:
                 line = self.send_line("version", accept_prefixes=("SHELL:",))
             except TimeoutError as e:
                 raise TimeoutError(
-                    "no shell reply for 'version' — the scanner port may still "
-                    "be armed in SUMP/PulseView mode from a previous `la "
-                    "pulseview` session. The firmware only reverts to the text "
-                    "shell ~60s after PulseView disconnects, and reopening this "
-                    "port (as this command just did) resets that countdown. "
-                    "Wait ~60s without opening the scanner port (including via "
-                    "`faultycmd verify`) and try again."
+                    "no shell reply for 'version' — the scanner port is likely "
+                    "still armed in SUMP/PulseView mode from a `la pulseview` "
+                    "session that didn't get to release it cleanly (e.g. "
+                    "faultycmd was interrupted, or PulseView crashed). Re-run "
+                    "`faultycmd la pulseview` and close PulseView normally so "
+                    "the automatic release can run, or power-cycle / replug "
+                    "the board to reset it."
                 ) from e
             self.firmware_version = parse_shell_version(line)
             assert_version_match(self.firmware_version)
@@ -211,6 +208,43 @@ class ScannerClient:
                 self._ser.close()
                 self._ser = None
             raise
+
+    # Mirrors SUMP_EXIT_GRACE_MS in the firmware's main.c: the SUMP
+    # session only tears down after a *continuous* DTR-low disconnect
+    # lasting this long (anything shorter, or any reconnect in
+    # between, is ignored so a normal PulseView hand-off survives).
+    # Kept in sync manually — bump both if the firmware constant
+    # changes.
+    SUMP_EXIT_GRACE_S = 60.0
+
+    def force_exit_sump(self, margin_s: float = 3.0) -> None:
+        """Force the firmware out of SUMP/PulseView mode.
+
+        Closing the port normally is *not* a reliable way to trigger
+        this: on POSIX, ``la_sump_arm`` deliberately clears HUPCL so
+        faultycmd's own close (right after arming) doesn't drop DTR
+        before PulseView gets a chance to connect — and that cleared
+        HUPCL state tends to persist on the tty node, so PulseView's
+        own later close often doesn't drop DTR either. The only signal
+        the firmware actually watches for is DTR low, sustained past
+        ``SUMP_EXIT_GRACE_S``, so this pulls DTR low directly (an
+        ioctl, independent of HUPCL) and holds it for that long plus a
+        safety margin. Blocks for ~``SUMP_EXIT_GRACE_S + margin_s``
+        seconds.
+
+        Call this on a client opened with ``check_firmware_version=
+        False`` — the port is still speaking binary SUMP, not the text
+        shell, so the normal ``open()`` version probe would just time
+        out.
+        """
+        ser = self._require_serial()
+        if not hasattr(ser, "dtr"):
+            raise RuntimeError(
+                "underlying serial connection doesn't support DTR control"
+            )
+        ser.dtr = False  # type: ignore[attr-defined]
+        time.sleep(self.SUMP_EXIT_GRACE_S + margin_s)
+        ser.dtr = True  # type: ignore[attr-defined]
 
     def close(self) -> None:
         if self._ser is not None:
