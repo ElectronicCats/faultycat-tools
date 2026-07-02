@@ -61,11 +61,9 @@ Every `--port` option overrides USB auto-discovery for that engine.
 | ------------------------------------------------------------------------ | ------------------------------------------- |
 | `i2c scan [--timeout-s N]`                                              | Sweep all pins for SDA/SCL + ACKed addresses |
 | `i2c probe [SDA SCL] [--timeout-s N] [--scan-timeout-s N]`              | Rescan addresses on known (or auto-discovered) pins |
-| `i2c la [SDA SCL] [--interval-us N] [--samples N] [--decode/--no-decode] [--vcd FILE] [--timeout-s N]` | Capture + decode a raw SDA/SCL trace |
-| `i2c la-sump-arm [SDA SCL] [--pulseview/--no-pulseview] [--scan-timeout-s N]` | Arm SUMP/OLS mode for live PulseView capture |
 
-`SDA`/`SCL` are positional and optional on `probe`, `la`, and
-`la-sump-arm` — omit both to auto-discover via `i2c scan`.
+`SDA`/`SCL` are positional and optional on `probe` — omit both to
+auto-discover via `i2c scan`.
 
 ## `uart` — Target UART Passthrough
 
@@ -78,6 +76,18 @@ Every `--port` option overrides USB auto-discovery for that engine.
 | `uart parity n\|e\|o`                                              | Reconfigure parity on a live bridge |
 | `uart stopbits 1\|2`                                               | Reconfigure stop bits on a live bridge |
 | `uart console [--target-port DEV] [--baud N] [--parity ...] [--stopbits ...]` | Enable + open a live byte console (`Ctrl-X` to exit) |
+
+## `la` — Protocol-Agnostic Logic Analyzer (CDC2)
+
+| Command                                                              | Description                              |
+| ------------------------------------------------------------------------ | ------------------------------------------- |
+| `la capture [--interval-us N] [--samples N] [--binary/--hex] [--decode none\|i2c\|uart] [--sda N] [--scl N] [--rx N] [--baud N] [--vcd FILE] [--timeout-s N]` | Capture GP0..GP7, optionally decode on-device or export to VCD |
+| `la pulseview [--pulseview/--no-pulseview]`                            | Arm SUMP/OLS mode for a live PulseView/sigrok capture |
+
+`la capture` does not auto-discover I2C pins — `--sda`/`--scl` default
+to 0/1; run `i2c scan` first if you don't know the wiring. `la
+pulseview` takes no pin arguments at all (it captures all 8 channels
+raw); pick SDA/SCL/etc. inside PulseView.
 
 ## Exit Codes
 

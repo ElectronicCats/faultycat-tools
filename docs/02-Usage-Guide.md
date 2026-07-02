@@ -3,7 +3,8 @@
 This guide walks through the most common `faultycmd` workflows: checking
 the board, the two fault-injection engines (EMFI / crowbar), automated
 sweeps (campaign), the SWD/JTAG scanner, the I2C bus tools, the target UART
-bridge, and the interactive TUI dashboard.
+bridge, the protocol-agnostic logic analyzer, and the interactive TUI
+dashboard.
 
 Every command prints the FaultyCat banner first, then Rich-formatted
 output (tables for status, colored success/warning/error lines).
@@ -115,16 +116,16 @@ narrow the sweep if you already know the TARGETSEL value.
 faultycmd i2c scan                          # sweep all 8 header pins for SDA/SCL + ACKed addrs
 faultycmd i2c probe 0 1                      # rescan addresses on known pins (skip full sweep)
 faultycmd i2c probe                          # SDA/SCL omitted -> auto-discovers via `scan` first
-faultycmd i2c la 0 1 --samples 4096 --vcd out.vcd   # capture + decode + export
-faultycmd i2c la-sump-arm 0 1                # arm SUMP/OLS mode, auto-launch PulseView
 ```
 
 I2C has no fixed pin pair — any of the 8 scanner-header channels can carry
-SDA/SCL — so `probe`, `la`, and `la-sump-arm` all accept omitting the pin
-arguments to auto-discover them via a full `i2c scan` first.
+SDA/SCL — so `probe` accepts omitting the pin arguments to auto-discover
+them via a full `i2c scan` first.
 
-For the PulseView live-capture workflow (`la-sump-arm`), see
-[PULSEVIEW_SETUP.md](PULSEVIEW_SETUP.md).
+>[!Note]
+> Raw signal capture (with optional on-device I2C/UART decode or VCD/
+> PulseView export) has moved to its own top-level `la` command — see
+> section 9 below. It's no longer nested under `i2c` or `uart`.
 
 ## 8. Target UART Passthrough
 
@@ -144,7 +145,37 @@ Or do it in one step with a live console (`Ctrl-X` to exit):
 faultycmd uart console --baud 115200
 ```
 
-## 9. Interactive TUI
+## 9. Logic Analyzer (Protocol-Agnostic)
+
+Captures the full GP0..GP7 scanner-header bank verbatim — the firmware
+never interprets the channels. A "protocol" is nothing more than a wiring
+convention plus the decoder you pick: on-device with `--decode i2c|uart`,
+or host-side in PulseView/sigrok via `la pulseview`. Any digital signal
+wired onto GP0..GP7 is fair game, not just I2C/UART.
+
+```bash
+faultycmd la capture --samples 4096 --vcd out.vcd            # raw capture, export to VCD
+faultycmd la capture --decode i2c --sda 0 --scl 1             # on-device I2C decode
+faultycmd la capture --decode uart --rx 0 --baud 115200        # on-device UART decode
+faultycmd la pulseview                                         # arm SUMP/OLS mode, auto-launch PulseView
+faultycmd la pulseview --no-pulseview                          # arm only, open PulseView yourself
+```
+
+`la capture` options of note: `--interval-us` (sample interval, default
+2µs), `--binary/--hex` (stream raw bytes instead of a hexdump — halves
+USB traffic at fast intervals), `--decode none|i2c|uart` (default
+`none`), `--sda`/`--scl` or `--rx`/`--baud` for the chosen decoder, and
+`--timeout-s`. Unlike `i2c probe`, `la capture` does **not**
+auto-discover SDA/SCL — pass them explicitly (they default to 0/1) or
+run `i2c scan` first if you don't already know the wiring.
+
+`la pulseview` takes no pin arguments at all: it arms the firmware's raw
+SUMP/OLS capture of all 8 channels and hands off to PulseView, where you
+pick which channels are SDA/SCL (or whatever else) and attach the
+decoder yourself. For that live-capture workflow, see
+[PULSEVIEW_SETUP.md](PULSEVIEW_SETUP.md).
+
+## 10. Interactive TUI
 
 ```bash
 faultycmd tui
@@ -170,5 +201,6 @@ Control modals prefill from the last successfully-applied parameters (see
 >[!Note]
 > While the TUI is open it holds CDC0 (EMFI) and CDC1 (crowbar/campaign)
 > exclusively, and CDC2 (scanner) read-only for the diag tail. Don't run
-> `faultycmd scanner`/`i2c` commands or open a serial terminal against the
-> same ports from a second window at the same time.
+> `faultycmd scanner`/`i2c`/`uart`/`la` commands or open a serial terminal
+> against the same ports from a second window at the same time — they all
+> ride the same CDC2 text shell.

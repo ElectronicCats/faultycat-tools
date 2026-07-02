@@ -64,7 +64,7 @@ sudo faultycmd setup-env
   an external trigger (`--trigger ext_rising`, etc.) the command blocks
   until that signal arrives or the timeout elapses.
 
-## `i2c la-sump-arm` opens PulseView but it shows no channels
+## `la pulseview` opens PulseView but it shows no channels
 
 This is almost always one of:
 
@@ -79,13 +79,24 @@ This is almost always one of:
    PulseView keys its saved session on device model + port path, so a
    different `/dev/ttyACMx` or `COMx` needs the one-time setup repeated.
 
-## `i2c scan`/`probe`/`la` find nothing
+## `i2c scan`/`probe` find nothing
 
 I2C has no fixed SDA/SCL pin pair on FaultyCat — any of the 8
 scanner-header channels can carry either signal. Confirm the target is
 actually wired to the scanner header and powered, then re-run `i2c scan`
 (used internally for auto-discovery whenever `SDA`/`SCL` are omitted from
-`probe`/`la`/`la-sump-arm`).
+`probe`).
+
+## `la capture --decode i2c` (or `--decode uart`) decodes nothing
+
+Unlike `i2c probe`, `la capture` never auto-discovers pins — `--sda`/
+`--scl` (or `--rx`) default to channels 0/1 regardless of the actual
+wiring. If you don't already know which GP pins the target is wired to,
+run `i2c scan` first and pass the discovered channels explicitly. For
+`--decode uart`, also check the oversampling ratio warning: with
+`--interval-us` too large relative to `--baud`, sampling drops below 4x
+the bit rate and decoding becomes unreliable — lower `--interval-us` or
+`--baud`.
 
 ## Shell completion: `'faultycmd' not found on PATH`
 

@@ -49,10 +49,10 @@ step-by-step workflows.
 | --- | --- |
 | [00-Overview.md](docs/00-Overview.md) | Project snapshot and stack |
 | [01-Installation.md](docs/01-Installation.md) | Per-OS install steps, prerequisites, uninstall |
-| [02-Usage-Guide.md](docs/02-Usage-Guide.md) | Step-by-step workflows: devices/verify, EMFI, crowbar, campaign, scanner, I2C, UART, TUI |
+| [02-Usage-Guide.md](docs/02-Usage-Guide.md) | Step-by-step workflows: devices/verify, EMFI, crowbar, campaign, scanner, I2C, UART, logic analyzer, TUI |
 | [03-Quick-Reference.md](docs/03-Quick-Reference.md) | Full command table + exit codes |
 | [04-Troubleshooting.md](docs/04-Troubleshooting.md) | Common failure modes and fixes |
-| [PULSEVIEW_SETUP.md](docs/PULSEVIEW_SETUP.md) | Wiring PulseView to `i2c la-sump-arm` |
+| [PULSEVIEW_SETUP.md](docs/PULSEVIEW_SETUP.md) | Wiring PulseView to `la pulseview` |
 | [WINDOWS_SUMP_DTR_ISSUE.md](docs/WINDOWS_SUMP_DTR_ISSUE.md) | Windows DTR root-cause analysis |
 
 ## Wiki and Getting Started

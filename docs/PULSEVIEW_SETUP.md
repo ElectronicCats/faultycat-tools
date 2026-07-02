@@ -1,6 +1,6 @@
 # PulseView setup (AppImage)
 
-`faultycmd i2c la-sump-arm` arms the firmware's SUMP/OLS mode and then
+`faultycmd la pulseview` arms the firmware's SUMP/OLS mode and then
 auto-launches PulseView via `shutil.which("pulseview")`. That only works
 if a `pulseview` binary is reachable on `PATH` — a raw AppImage downloaded
 from the site below is **not** picked up by name, since its filename
@@ -48,7 +48,7 @@ can be ignored.
 ## 5. Use it
 
 ```bash
-faultycmd i2c la-sump-arm <sda> <scl>
+faultycmd la pulseview
 ```
 
 With `pulseview` resolvable on `PATH`, this arms the firmware and opens
@@ -56,16 +56,20 @@ PulseView automatically (driver: `ols`, connected to the scanner CDC
 port). Pass `--no-pulseview` to skip the auto-launch and open it
 yourself.
 
-`<sda>`/`<scl>` can be omitted (`faultycmd i2c la-sump-arm`). I2C has
-no fixed pin pair — the firmware's bit-bang core can use any of the 8
-scanner-header channels as SDA/SCL (see
-[`I2C_SCANNER_INTERNALS.md`](../../faultycat-firmware/docs/I2C_SCANNER_INTERNALS.md)) —
-so when they're left out, the CLI runs a full `i2c scan` sweep first
-to find them before arming SUMP mode.
+`la pulseview` takes no pin arguments — unlike the on-device decoder in
+`la capture --decode i2c`, the firmware never learns which channels are
+SDA/SCL for a PulseView capture; it just streams the raw GP0..GP7 bank
+and you tell PulseView which channels to decode (see step 7). If you
+don't already know which pins the target is wired to, run
+`faultycmd i2c scan` first — it prints the pair it finds (`Auto-discovered
+sda=GP<n> scl=GP<n>`) — and use those channel numbers below. I2C has no
+fixed pin pair on FaultyCat; the firmware's bit-bang core can use any of
+the 8 scanner-header channels as SDA/SCL (see
+[`I2C_SCANNER_INTERNALS.md`](../../faultycat-firmware/docs/I2C_SCANNER_INTERNALS.md)).
 
 ## 6. Initial PulseView connection setup
 
-If you open PulseView manually (instead of letting `la-sump-arm`
+If you open PulseView manually (instead of letting `la pulseview`
 launch and connect it for you), you need to point it at the right
 driver and port yourself:
 
@@ -81,7 +85,7 @@ driver and port yourself:
 2. In PulseView, click the connection icon (next to the driver
    selector, top left) to open **Connect to Device**.
 3. Under **Driver**, pick **Open Bench Logic Sniffer** — this is the
-   same `ols` driver `la-sump-arm` uses internally via
+   same `ols` driver `la pulseview` uses internally via
    `-d ols:conn=<port>`.
 4. Under **Connection**, select **Serial Port** and enter the port
    found in step 1.
@@ -93,58 +97,51 @@ Once connected, continue with the channel/decoder setup in step 7.
 ## 7. Configure channels + I2C decoder (one-time)
 
 PulseView's `-d ols:conn=<port>` flag (used internally by
-`la-sump-arm`) only selects the driver and connects to the device — it
+`la pulseview`) only selects the driver and connects to the device — it
 cannot also preselect channels or attach a decoder from the command
 line. PulseView has no CLI option that combines a live device with a
 saved channel/decoder setup (`--settings` only applies when opening a
 capture file, not a live device). So this configuration has to be done
 once by hand in the GUI; PulseView remembers it from then on.
 
-### Why only GP0/GP1 matter
+### Which channels are SDA/SCL?
 
 The firmware's SUMP/OLS implementation
 (`faultycat-firmware/services/sump_ols/sump_ols.c`) reports **8
 channels** to satisfy the OLS metadata handshake (`NUM_PROBES_LONG =
-8`), matching the raw `GPIO_IN[7:0]` byte-per-sample format used by
-`i2c_la` (see `i2c_la.h`). Only two of those eight bits are ever
-meaningful for an I2C capture:
+8`), matching the raw `GPIO_IN[7:0]` byte-per-sample format also used by
+the on-device logic analyzer (see `i2c_la.h`). Unlike the on-device
+`la capture --decode i2c` path, `la pulseview` never tells the firmware
+which pins are SDA/SCL — it just arms a raw capture of all 8 channels,
+so *you* have to know which two channels are meaningful and map them to
+the decoder yourself:
 
-- bit/channel **0** = `GP0` = whichever pin you pass as `<sda>`
-- bit/channel **1** = `GP1` = whichever pin you pass as `<scl>`
-
-`faultycmd i2c la-sump-arm 0 1` arms `sda=GP0`, `scl=GP1` — so for
-that exact invocation, channel 0 is SDA and channel 1 is SCL. If you
-arm with different pin numbers, map the channels accordingly (channel
-N corresponds to GPIO N for whichever role you assigned it).
-
-If you omit `<sda>`/`<scl>` and let the CLI auto-discover them via
-`i2c scan`, it prints the pair it found (`Auto-discovered sda=GP<n>
-scl=GP<n>`) before arming — use those numbers for the channel mapping
-in step 2/3 below instead of assuming GP0/GP1.
-
-(If you connected manually via step 6 instead of `la-sump-arm`, skip
-the `i2c scan` auto-discovery note above and use whichever
-`<sda>`/`<scl>` pins you intend to probe.)
+- If you wired SDA/SCL to `GP0`/`GP1` (the default channels
+  `la capture` also assumes), channel **0** is SDA and channel **1** is
+  SCL.
+- If you're not sure of the wiring, run `faultycmd i2c scan` first — it
+  prints the pair it finds (`Auto-discovered sda=GP<n> scl=GP<n>`) —
+  and use those channel numbers for the mapping below instead of
+  assuming 0/1.
 
 ### Steps
 
-1. Run `faultycmd i2c la-sump-arm 0 1` — PulseView opens with the
-   `ols` driver on the scanner port, 8 channels visible.
-2. In the channel list on the left, disable every channel except
-   **0** and **1**. Renaming `0` → `SDA` and `1` → `SCL` (right-click
-   → rename) isn't required but makes the decoder mapping in the next
-   step unambiguous.
+1. Run `faultycmd la pulseview` — PulseView opens with the `ols`
+   driver on the scanner port, 8 channels visible.
+2. In the channel list on the left, disable every channel except the
+   two you identified above (e.g. **0** and **1**). Renaming them →
+   `SDA`/`SCL` (right-click → rename) isn't required but makes the
+   decoder mapping in the next step unambiguous.
 3. Click **Add protocol decoder** (`Ctrl+D`), search for **I2C**, add
-   it, and assign:
-   - `SCL` (decoder pin) → channel **1**
-   - `SDA` (decoder pin) → channel **0**
+   it, and assign the `SCL`/`SDA` decoder pins to the matching
+   channels.
 4. Close PulseView normally — no explicit "save" step needed.
 
 ### Why it persists
 
 PulseView auto-saves the last session (device, enabled channels,
 decoder stack) to `~/.config/sigrok/PulseView.conf`. On the next
-`la-sump-arm` invocation, PulseView matches the new device against
+`la pulseview` invocation, PulseView matches the new device against
 that saved entry by **model** (`FaultyCat I2C LA`, reported via the
 SUMP metadata device-name token) and **connection_id** (the serial
 port path) — if both match, it restores the exact channel/decoder

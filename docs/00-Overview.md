@@ -3,9 +3,9 @@
 **`faultycmd`** is the host-side tool for the **FaultyCat v3** board: a
 click+Rich CLI and Textual TUI for driving electromagnetic fault injection
 (EMFI), voltage-glitch (crowbar) attacks, SWD/JTAG target scanning, I2C bus
-probing, and automated parameter sweeps (campaigns) over FaultyCat's USB
-CDC composite interface. It's built and maintained by Electronic Cats /
-PWNLab.
+probing, a protocol-agnostic logic analyzer, and automated parameter sweeps
+(campaigns) over FaultyCat's USB CDC composite interface. It's built and
+maintained by Electronic Cats / PWNLab.
 
 >[!WARNING]
 > FaultyCat is a fault-injection tool intended solely for authorized
@@ -36,11 +36,13 @@ building the public wiki — it favors accuracy and coverage over polish.
 ## Recent Changes (this update)
 
 [TODO: list the headline changes from this release for the support team —
-e.g. the i2c_scanner branch work: I2C auto-discovery of SDA/SCL,
-`la-sump-arm` PulseView integration, the Windows SUMP/DTR grace-period fix,
-plus the internal refactors (status-line mixin, dict-form mixin, getattr
-cleanups). Recent commit titles on this branch (`i2c_scanner`) suggest this
-list but should be confirmed/expanded by whoever is closest to the release.]
+e.g. the i2c_scanner branch work: I2C auto-discovery of SDA/SCL, the
+protocol-agnostic logic analyzer being unified under its own top-level
+`la` command (`la capture` / `la pulseview`, no longer nested under `i2c`
+or `uart`), the Windows SUMP/DTR grace-period fix, plus the internal
+refactors (status-line mixin, dict-form mixin, getattr cleanups). Recent
+commit titles on this branch (`i2c_scanner`) suggest this list but should
+be confirmed/expanded by whoever is closest to the release.]
 
 ## Where to Go Next
 
@@ -48,10 +50,10 @@ list but should be confirmed/expanded by whoever is closest to the release.]
 | --- | --- |
 | [01-Installation.md](01-Installation.md) | Per-OS install steps (packaged installers + from source), prerequisites, uninstall |
 | [02-Configuration.md](02-Configuration.md) | Environment variables, persisted state, version-parity check, port discovery, permissions |
-| [03-Usage-Guide.md](03-Usage-Guide.md) | Step-by-step workflows: devices/verify, EMFI, crowbar, campaign, scanner, I2C, UART, TUI |
+| [03-Usage-Guide.md](03-Usage-Guide.md) | Step-by-step workflows: devices/verify, EMFI, crowbar, campaign, scanner, I2C, UART, logic analyzer, TUI |
 | [04-Quick-Reference.md](04-Quick-Reference.md) | Full command table + exit codes |
 | [05-Troubleshooting.md](05-Troubleshooting.md) | Common failure modes and fixes |
-| [PULSEVIEW_SETUP.md](PULSEVIEW_SETUP.md) | Existing deep-dive: wiring PulseView to `i2c la-sump-arm` |
+| [PULSEVIEW_SETUP.md](PULSEVIEW_SETUP.md) | Existing deep-dive: wiring PulseView to `la pulseview` |
 | [WINDOWS_SUMP_DTR_ISSUE.md](WINDOWS_SUMP_DTR_ISSUE.md) | Existing deep-dive: Windows DTR root-cause analysis (in Spanish) |
 
 >[!Note]
