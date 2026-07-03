@@ -293,6 +293,41 @@ def test_la_timeout_waiting_for_hex():
         cli.la(2, 4, timeout_s=0.2)
 
 
+def test_la_trigger_ch_appends_trig_arg():
+    fake = FakeShellSerial()
+    fake.queue_lines(
+        "LA: OK capture ch=GP0..GP7 stream n=4 interval_us=2",
+        "01 02",
+        "03 00",
+    )
+    with _client(fake) as cli:
+        cli.la(2, 4, timeout_s=2.0, trigger_ch=3)
+    assert b"la 2 4 trig=3\r\n" in bytes(fake.written)
+
+
+def test_la_trigger_ch_and_timeout_appends_trig_arg_with_ms():
+    fake = FakeShellSerial()
+    fake.queue_lines(
+        "LA: OK capture ch=GP0..GP7 stream n=4 interval_us=2",
+        "01 02",
+        "03 00",
+    )
+    with _client(fake) as cli:
+        cli.la(2, 4, timeout_s=2.0, trigger_ch=3, trigger_timeout_ms=1500)
+    assert b"la 2 4 trig=3:1500\r\n" in bytes(fake.written)
+
+
+def test_la_trigger_timeout_reply_raises_scanner_error():
+    # Firmware's `LA: ERR trigger_timeout` (trig= wait exceeded) must
+    # surface the same way any other `LA: ERR ...` reply does — no
+    # special-casing needed in _capture_la_stream's generic " ERR " check.
+    fake = FakeShellSerial()
+    fake.queue_lines("LA: ERR trigger_timeout")
+    with _client(fake) as cli, pytest.raises(ScannerError) as ei:
+        cli.la(2, 4, timeout_s=2.0, trigger_ch=0, trigger_timeout_ms=100)
+    assert "trigger_timeout" in ei.value.line
+
+
 def test_la_sump_arm_sends_enter_and_returns_ok():
     fake = FakeShellSerial()
     fake.queue_lines("LA: OK entering SUMP mode ch=GP0..GP7")
