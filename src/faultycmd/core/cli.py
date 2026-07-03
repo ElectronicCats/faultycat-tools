@@ -1163,18 +1163,22 @@ def _la_client(ctx: click.Context) -> ScannerClient:
     "--interval-us",
     "interval_us",
     type=int,
-    default=2,
+    default=1,
     show_default=True,
-    help="Sample interval in microseconds.",
+    help="Sample interval in microseconds (firmware minimum/fastest: 1us — "
+    "sample_interval_us=0 is treated as 1 by the firmware).",
 )
 @click.option(
     "--samples",
     "n",
     type=int,
-    default=2048,
+    default=16384,
     show_default=True,
-    help="Max samples to capture (firmware hard ceiling: 262144, the SUMP/OLS "
-    "readcount limit).",
+    help="Samples to capture. This shell command streams continuously from "
+    "the firmware's ring buffer with no hard sample-count ceiling (unlike "
+    "`la pulseview`'s bounded SUMP_OLS_MAX_SAMPLES=16384 capture) — going "
+    "well past the default is fine as long as the host keeps draining USB "
+    "fast enough to avoid an OVERFLOW.",
 )
 @click.option(
     "--binary/--hex",
