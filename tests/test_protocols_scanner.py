@@ -275,6 +275,47 @@ def test_la_binary_mode_sends_bin_and_reads_raw_bytes():
     assert cap.samples == b"\x01\x02\x03\x04"
 
 
+def test_la_hex_mode_no_overflow_marker_leaves_overflow_false():
+    fake = FakeShellSerial()
+    fake.queue_lines(
+        "LA: OK capture ch=GP0..GP7 stream n=4 interval_us=2",
+        "01 02",
+        "03 00",
+    )
+    with _client(fake) as cli:
+        cap = cli.la(2, 4, timeout_s=2.0)
+    assert cap.overflow is False
+
+
+def test_la_hex_mode_detects_trailing_overflow_marker():
+    # Firmware writes `\nOVERFLOW\n` right after the last hex char when
+    # the capture ring lapped the read cursor mid-stream (see
+    # la_stream_and_finish in main.c) — the transfer still completes, so
+    # this must not be mistaken for TRUNC/an error, just surfaced.
+    fake = FakeShellSerial()
+    fake.queue_lines(
+        "LA: OK capture ch=GP0..GP7 stream n=4 interval_us=2",
+        "01 02",
+        "03 00",
+    )
+    fake.replies.append(b"\nOVERFLOW\n")
+    with _client(fake) as cli:
+        cap = cli.la(2, 4, timeout_s=2.0)
+    assert cap.samples == bytes.fromhex("01020300")
+    assert cap.overflow is True
+
+
+def test_la_binary_mode_detects_trailing_overflow_marker():
+    fake = FakeShellSerial()
+    fake.queue_lines("LA: OK capture ch=GP0..GP7 stream n=4 interval_us=2")
+    fake.replies.append(b"\x01\x02\x03\x04")
+    fake.replies.append(b"\nOVERFLOW\n")
+    with _client(fake) as cli:
+        cap = cli.la(2, 4, timeout_s=2.0, binary=True)
+    assert cap.samples == b"\x01\x02\x03\x04"
+    assert cap.overflow is True
+
+
 def test_la_err_raises():
     fake = FakeShellSerial()
     fake.queue_lines("LA: ERR start_failed")
