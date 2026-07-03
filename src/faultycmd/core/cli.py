@@ -1318,14 +1318,12 @@ def la_pulseview(ctx: click.Context, open_pulseview: bool) -> None:
 
     By default this also launches PulseView on this same port right away,
     blocks until you close it, and then forces the firmware back to the
-    text shell (see ``ScannerClient.force_exit_sump`` — closing the port
-    normally isn't a reliable trigger for this on either Linux or
-    Windows, so this command does it explicitly instead of hoping for a
-    DTR drop). That release takes about a minute — the port stays
-    unusable by any other faultycmd command until it completes. Pass
-    --no-pulseview to skip launching/waiting and drive PulseView yourself;
-    in that case nothing releases the port automatically, so re-run this
-    command (with --no-pulseview) once you're done to force the release.
+    text shell (see ``ScannerClient.force_exit_sump`` — an explicit
+    protocol byte, not a DTR drop, so it's instant and doesn't depend on
+    how the host OS handles the port close). Pass --no-pulseview to skip
+    launching/waiting and drive PulseView yourself; in that case nothing
+    releases the port automatically, so re-run this command (with
+    --no-pulseview) once you're done to force the release.
     """
     with _la_client(ctx) as cli:
         reply = cli.la_sump_arm()
@@ -1368,10 +1366,7 @@ def la_pulseview(ctx: click.Context, open_pulseview: bool) -> None:
     else:
         click.pause("Press any key once you've closed PulseView...")
 
-    print_info(
-        f"Releasing {port} from SUMP mode (forcing a firmware-side "
-        f"disconnect, takes ~{int(ScannerClient.SUMP_EXIT_GRACE_S) + 5}s)..."
-    )
+    print_info(f"Releasing {port} from SUMP mode...")
     with ScannerClient(port, check_firmware_version=False) as release_cli:
         release_cli.force_exit_sump()
     print_success(f"{port} released back to the text shell.")

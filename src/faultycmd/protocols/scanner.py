@@ -58,25 +58,6 @@ class _SerialLike(Protocol):
 SerialFactory = Callable[[str, int, float], _SerialLike]
 
 
-def _disable_hupcl(ser: _SerialLike | None) -> None:
-    """Clear HUPCL on ``ser``'s fd so closing it won't drop DTR.
-
-    Only meaningful on POSIX (termios); a no-op on Windows or for any
-    fake/non-fd serial stand-in used in tests.
-    """
-    if ser is None:
-        return
-    try:
-        import termios  # noqa: PLC0415 — POSIX-only, absent on Windows
-
-        fd = ser.fileno()  # type: ignore[attr-defined]
-        attrs = termios.tcgetattr(fd)
-        attrs[2] &= ~termios.HUPCL
-        termios.tcsetattr(fd, termios.TCSANOW, attrs)
-    except (ImportError, AttributeError, OSError):
-        pass
-
-
 def _default_serial_factory(
     port: str, baud: int, per_byte_timeout: float
 ) -> _SerialLike:
@@ -179,9 +160,8 @@ class ScannerClient:
         Under normal use ``la pulseview`` handles the SUMP hand-off and
         release itself, so hitting this means that cleanup didn't run;
         the only reliable recovery left from here is a power cycle /
-        USB replug of the board (there is no in-band "poke" that's
-        both fast and guaranteed to work — see ``force_exit_sump`` for
-        why a quick DTR pulse can't do it).
+        USB replug of the board, or re-running ``force_exit_sump()``
+        directly against the port.
         """
         from ..utils.version_check import (  # noqa: PLC0415 — avoid import cycle
             assert_version_match,
@@ -209,28 +189,25 @@ class ScannerClient:
                 self._ser = None
             raise
 
-    # Mirrors SUMP_EXIT_GRACE_MS in the firmware's main.c: the SUMP
-    # session only tears down after a *continuous* DTR-low disconnect
-    # lasting this long (anything shorter, or any reconnect in
-    # between, is ignored so a normal PulseView hand-off survives).
-    # Kept in sync manually — bump both if the firmware constant
-    # changes.
-    SUMP_EXIT_GRACE_S = 60.0
+    # CMD_FORCE_EXIT in the firmware's sump_ols.c — a top-level SUMP
+    # command byte, never sent by sigrok's ols driver, that the parser
+    # treats as "leave SUMP mode now" (mirrors buspirate_compat's own
+    # 0x0F BP_CMD_USER_TERM convention). Kept in sync manually — bump
+    # both if the firmware constant changes.
+    SUMP_FORCE_EXIT_BYTE = 0x0F
 
-    def force_exit_sump(self, margin_s: float = 3.0) -> None:
+    def force_exit_sump(self, timeout_s: float = 3.0) -> None:
         """Force the firmware out of SUMP/PulseView mode.
 
-        Closing the port normally is *not* a reliable way to trigger
-        this: on POSIX, ``la_sump_arm`` deliberately clears HUPCL so
-        faultycmd's own close (right after arming) doesn't drop DTR
-        before PulseView gets a chance to connect — and that cleared
-        HUPCL state tends to persist on the tty node, so PulseView's
-        own later close often doesn't drop DTR either. The only signal
-        the firmware actually watches for is DTR low, sustained past
-        ``SUMP_EXIT_GRACE_S``, so this pulls DTR low directly (an
-        ioctl, independent of HUPCL) and holds it for that long plus a
-        safety margin. Blocks for ~``SUMP_EXIT_GRACE_S + margin_s``
-        seconds.
+        Writes the SUMP exit-escape byte directly on the wire and
+        waits for the firmware's "OK exited" confirmation. This
+        replaces an older DTR-pulse-based implementation: closing the
+        port, or otherwise dropping DTR, used to be the only way to
+        signal this, but that depended on how each host OS's CDC-ACM
+        driver handles DTR on close — unreliable on Windows in
+        particular (see docs/WINDOWS_SUMP_DTR_ISSUE.md). Sending an
+        explicit protocol byte instead works identically on every
+        platform and is near-instant rather than a ~minute-long wait.
 
         Call this on a client opened with ``check_firmware_version=
         False`` — the port is still speaking binary SUMP, not the text
@@ -238,13 +215,21 @@ class ScannerClient:
         out.
         """
         ser = self._require_serial()
-        if not hasattr(ser, "dtr"):
-            raise RuntimeError(
-                "underlying serial connection doesn't support DTR control"
-            )
-        ser.dtr = False  # type: ignore[attr-defined]
-        time.sleep(self.SUMP_EXIT_GRACE_S + margin_s)
-        ser.dtr = True  # type: ignore[attr-defined]
+        ser.write(bytes([self.SUMP_FORCE_EXIT_BYTE]))
+        deadline = time.time() + timeout_s
+        buf = ""
+        while time.time() < deadline:
+            chunk = ser.read(64)
+            if not chunk:
+                continue
+            buf += chunk.decode(errors="replace")
+            if "SUMP: OK exited" in buf:
+                return
+        raise TimeoutError(
+            "no exit confirmation from the firmware after CMD_FORCE_EXIT — "
+            "the port may already be back in text mode, or still stuck in "
+            "SUMP; power-cycle / replug the board if `verify` keeps failing."
+        )
 
     def close(self) -> None:
         if self._ser is not None:
@@ -736,38 +721,13 @@ class ScannerClient:
 
         Unlike every other command on this client, the caller is
         expected to close this connection (the ``with`` block) right
-        after this returns — once armed, every byte on this CDC is
-        owned by the binary SUMP parser until the host drops DTR (see
-        ``main.c::sump_on_exit_cb`` / docs/I2C_LA_DMA_TIMER_PLAN.md
-        §6), so PulseView/sigrok-cli must open the *same* port next,
-        before that happens. There is no in-band way back to the text
-        shell from this client.
-
-        That close must NOT itself drop DTR, or the firmware reverts
-        to the text shell before PulseView gets a chance to connect —
-        pyserial's default termios has HUPCL set, so closing this fd
-        (here or implicitly when the host process exits) would lower
-        DTR immediately, losing the race every time. Clear HUPCL on
-        the fd before returning so DTR stays asserted across the
-        close.
-
-        ``_disable_hupcl`` is POSIX-only (termios) and a no-op on
-        Windows, where ``usbser.sys`` typically forces DTR low on
-        ``CloseHandle()`` regardless — see
-        docs/WINDOWS_SUMP_DTR_ISSUE.md. The firmware now debounces
-        that disconnect (``SUMP_EXIT_DEBOUNCE_MS`` in main.c) so a
-        same-port reopen shortly after this close (PulseView) survives
-        it; forcing ``dtr = True`` here first is a no-cost best-effort
-        extra that can't hurt and may help on some Windows CDC stacks.
+        after this returns, so PulseView/sigrok-cli can open the *same*
+        port next. The armed session no longer depends on DTR staying
+        up across that handoff — the firmware only leaves SUMP mode on
+        an explicit ``force_exit_sump()`` call (see there), so this
+        close can happen however the OS wants to handle it.
         """
-        reply = self._expect_ok("LA:", "la sump enter")
-        _disable_hupcl(self._ser)
-        if self._ser is not None:
-            try:
-                self._ser.dtr = True  # type: ignore[attr-defined]
-            except Exception:
-                pass
-        return reply
+        return self._expect_ok("LA:", "la sump enter")
 
     # -- internals --------------------------------------------------
 
