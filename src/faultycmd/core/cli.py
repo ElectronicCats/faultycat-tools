@@ -293,7 +293,8 @@ def verify(quiet: bool) -> None:
         print_warning("Troubleshooting tips:")
         print_dim("1. Make sure the FaultyCat is connected via USB")
         print_dim("2. Try reconnecting the USB cable")
-        print_dim("3. Check udev rules / dialout group: faultycmd setup-env")
+        if platform.system() == "Linux":
+            print_dim("3. Check udev rules / dialout group: faultycmd setup-env")
         raise SystemExit(1)
 
 
@@ -1503,15 +1504,15 @@ def completion_install(shell: str | None) -> None:
 # -----------------------------------------------------------------------------
 
 
-@main.command("setup-env")
+@click.command("setup-env")
 def setup_env() -> None:
     """Setup environment: install udev rules and add user to the dialout group.
 
-    Requires root privileges (sudo). Installs the udev rule needed for
-    non-root access to the FaultyCat CDC interfaces (VID 1209, PID fa17)
-    and adds the current user to the 'dialout' group.
+    Linux-only. Requires root privileges (sudo). Installs the udev rule
+    needed for non-root access to the FaultyCat CDC interfaces
+    (VID 1209, PID fa17) and adds the current user to the 'dialout' group.
     """
-    if platform.system() != "Windows" and os.geteuid() != 0:
+    if os.geteuid() != 0:
         print_error("Root privileges required. Please run with sudo:")
         print_dim(f"sudo {sys.argv[0]} setup-env")
         raise SystemExit(1)
@@ -1556,6 +1557,10 @@ def setup_env() -> None:
 
     print_success("Environment setup complete!")
     print_info("Please log out and log back in for group changes to take effect.")
+
+
+if platform.system() == "Linux":
+    main.add_command(setup_env)
 
 
 # -----------------------------------------------------------------------------
