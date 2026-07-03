@@ -714,7 +714,9 @@ class ScannerClient:
         # empty read means nothing is pending right now (the real serial's
         # own per-byte timeout already bounds how long that single read
         # blocked), not that the marker is still in flight.
-        overflow = (b"OVERFLOW" in data[needed:]) if binary else ("OVERFLOW" in text_tail)
+        overflow = (
+            (b"OVERFLOW" in data[needed:]) if binary else ("OVERFLOW" in text_tail)
+        )
         grace_deadline = min(deadline, time.time() + self.LA_OVERFLOW_GRACE_S)
         while not overflow and time.time() < grace_deadline:
             chunk = ser.read(64)
