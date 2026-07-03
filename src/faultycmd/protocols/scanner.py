@@ -106,6 +106,15 @@ class LaCapture:
 
     interval_us: int
     samples: bytes
+    overflow: bool = False
+    """True if the firmware's capture ring (``LA_CAPTURE_BUFFER_BYTES``)
+    lapped the read cursor while streaming — the full sample count still
+    arrived, but some samples were silently skipped ahead in time, so
+    ``samples`` may not be contiguous from that point on. Seen at fast
+    ``--interval-us`` (e.g. the 1us default) when USB CDC can't drain the
+    ring as fast as it fills, especially in hex mode (2 bytes/sample on
+    the wire). Raise ``--interval-us``, pass ``binary=True``, or lower
+    ``max_samples`` to avoid it."""
 
 
 class ScannerClient:
@@ -120,6 +129,12 @@ class ScannerClient:
     DEFAULT_BAUD = 115200
     DEFAULT_TIMEOUT = 3.0
     PER_BYTE_TIMEOUT = 0.2
+
+    # Bound on the extra read-past-`needed` grace window `_capture_la_stream`
+    # gives the firmware's trailing OVERFLOW marker to arrive (see there) —
+    # short because the marker is only ~11 bytes written immediately after
+    # the last sample, never a real wait for more capture data.
+    LA_OVERFLOW_GRACE_S = 0.5
 
     def __init__(
         self,
@@ -578,7 +593,7 @@ class ScannerClient:
         binary: bool,
         timeout_s: float,
         label: str,
-    ) -> tuple[re.Match[str], bytes]:
+    ) -> tuple[re.Match[str], bytes, bool]:
         """Shared reader for the ``la`` raw-capture command.
 
         Sends `cmd`, waits for the one `prefix` summary line (filtered the
@@ -597,6 +612,9 @@ class ScannerClient:
         fast ``--interval-us`` where USB CDC throughput is the limiting
         factor, not the firmware's capture ring. `label` is used in error
         messages only.
+
+        Returns ``(match, samples, overflow)`` — see ``LaCapture.overflow``
+        for what the flag means.
         """
         ser.reset_input_buffer()
         ser.write(f"{cmd}\r\n".encode())
@@ -651,6 +669,7 @@ class ScannerClient:
                 if not chunk:
                     continue
                 text = chunk.decode(errors="replace")
+                text_tail += text
                 if "TRUNC" in text:
                     truncated = True
                 hex_chars.extend(c for c in text if c in _HEX_DIGITS)
@@ -680,7 +699,33 @@ class ScannerClient:
             if binary
             else bytes.fromhex("".join(hex_chars[:needed]))
         )
-        return m, samples
+
+        # `la_stream_and_finish` (firmware) writes a trailing `\nOVERFLOW\n`
+        # right after the last sample byte/hex-char if the capture ring
+        # (LA_CAPTURE_BUFFER_BYTES, 32768 samples) lapped the read cursor
+        # during streaming — unlike TRUNC this doesn't stop the transfer
+        # short (all `needed` bytes/chars above are genuine), it just means
+        # some samples were silently skipped ahead in time, so `samples`
+        # may not be contiguous past the lap point. The marker usually
+        # rides in on the same read(s) that satisfied `needed` above (it's
+        # only ~11 bytes right behind the last sample); a bounded top-up
+        # read catches it if it hadn't hit the wire yet. Stop at the first
+        # empty read rather than spinning for the full grace window — an
+        # empty read means nothing is pending right now (the real serial's
+        # own per-byte timeout already bounds how long that single read
+        # blocked), not that the marker is still in flight.
+        overflow = (b"OVERFLOW" in data[needed:]) if binary else ("OVERFLOW" in text_tail)
+        grace_deadline = min(deadline, time.time() + self.LA_OVERFLOW_GRACE_S)
+        while not overflow and time.time() < grace_deadline:
+            chunk = ser.read(64)
+            if not chunk:
+                break
+            if binary:
+                overflow = b"OVERFLOW" in chunk
+            else:
+                overflow = "OVERFLOW" in chunk.decode(errors="replace")
+
+        return m, samples, overflow
 
     def la(
         self,
@@ -716,7 +761,7 @@ class ScannerClient:
             cmd += f" trig={trigger_ch}"
             if trigger_timeout_ms is not None:
                 cmd += f":{trigger_timeout_ms}"
-        m, samples = self._capture_la_stream(
+        m, samples, overflow = self._capture_la_stream(
             ser,
             cmd,
             "LA:",
@@ -728,6 +773,7 @@ class ScannerClient:
         return LaCapture(
             interval_us=int(m.group("interval_us")),
             samples=samples,
+            overflow=overflow,
         )
 
     def la_sump_arm(self) -> str:

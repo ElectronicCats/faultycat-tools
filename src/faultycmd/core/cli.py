@@ -1326,6 +1326,15 @@ def la_capture(
             trigger_timeout_ms=trigger_timeout_ms,
         )
     print_success(f"{len(cap.samples)} samples @ {cap.interval_us}µs (ch=GP0..GP7)")
+    if cap.overflow:
+        print_warning(
+            "firmware reported OVERFLOW — the capture ring (32768 samples) "
+            "lapped the USB drain during streaming, so some samples were "
+            "silently skipped ahead in time; the trace (and any --decode "
+            "output) may be discontinuous/wrong from that point on. Raise "
+            "--interval-us, pass --binary to halve bytes-on-wire, or lower "
+            "--samples."
+        )
     if decode == "uart":
         print_info(f"Decoding UART @ {baud} baud (rx=GP{rx})")
 
