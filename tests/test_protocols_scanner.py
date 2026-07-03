@@ -309,6 +309,20 @@ def test_la_sump_arm_err_raises():
         cli.la_sump_arm()
 
 
+def test_force_exit_sump_writes_escape_byte_and_waits_for_ok():
+    fake = FakeShellSerial()
+    fake.queue_lines("SUMP: OK exited (back to text shell)")
+    with _client(fake) as cli:
+        cli.force_exit_sump()
+    assert bytes(fake.written) == bytes([ScannerClient.SUMP_FORCE_EXIT_BYTE])
+
+
+def test_force_exit_sump_times_out_without_confirmation():
+    fake = FakeShellSerial()
+    with _client(fake) as cli, pytest.raises(TimeoutError):
+        cli.force_exit_sump(timeout_s=0.2)
+
+
 # -- mode switches ------------------------------------------------
 
 
