@@ -1237,6 +1237,31 @@ def _la_client(ctx: click.Context) -> ScannerClient:
     show_default=True,
     help="Max capture time in seconds.",
 )
+@click.option(
+    "--trigger/--no-trigger",
+    "trigger",
+    default=None,
+    help="Block the capture window's start until the trigger channel goes "
+    "low, then back it up with pre-trigger history so a decoder has idle "
+    "line to sync on (firmware `trig=<ch>`, see "
+    "LA_CAPTURE_TRIGGER_IMPLEMENTATION_PLAN.md). Defaults to on for "
+    "--decode uart (the motivating case) and off otherwise, so a plain "
+    "GPIO/raw capture keeps today's immediate-start behavior.",
+)
+@click.option(
+    "--trigger-ch",
+    type=int,
+    default=None,
+    help="Trigger channel. Defaults to --rx under --decode uart; required "
+    "for --trigger with --decode none/i2c.",
+)
+@click.option(
+    "--trigger-timeout-s",
+    type=float,
+    default=None,
+    help="Max time to wait for the trigger before giving up (default: same "
+    "as --timeout-s).",
+)
 @click.pass_context
 def la_capture(
     ctx: click.Context,
@@ -1250,6 +1275,9 @@ def la_capture(
     baud: int,
     vcd_path: str | None,
     timeout_s: float,
+    trigger: bool | None,
+    trigger_ch: int | None,
+    trigger_timeout_s: float | None,
 ) -> None:
     """Capture a raw GP0..GP7 logic trace with the firmware logic analyzer.
 
@@ -1266,9 +1294,40 @@ def la_capture(
                 "unreliable. Reduce --interval-us or lower --baud."
             )
 
+    if trigger is None:
+        trigger = decode == "uart"
+
+    resolved_trigger_ch: int | None = None
+    if trigger:
+        # --rx is the motivating case's natural default (--decode uart);
+        # --trigger-ch overrides it for --decode none/i2c/custom wiring.
+        resolved_trigger_ch = trigger_ch if trigger_ch is not None else rx
+
+    trigger_timeout_ms: int | None = None
+    la_call_timeout_s = timeout_s
+    if resolved_trigger_ch is not None:
+        effective_trigger_timeout_s = (
+            trigger_timeout_s if trigger_timeout_s is not None else timeout_s
+        )
+        trigger_timeout_ms = int(effective_trigger_timeout_s * 1000)
+        # The host read deadline covers the firmware's trigger wait too —
+        # the "LA:" summary line (and the sample stream after it) doesn't
+        # arrive until the trigger fires, so a --trigger-timeout-s longer
+        # than --timeout-s must not make the host give up first.
+        la_call_timeout_s = max(timeout_s, effective_trigger_timeout_s)
+
     with _la_client(ctx) as cli:
-        cap = cli.la(interval_us, n, timeout_s=timeout_s, binary=binary)
+        cap = cli.la(
+            interval_us,
+            n,
+            timeout_s=la_call_timeout_s,
+            binary=binary,
+            trigger_ch=resolved_trigger_ch,
+            trigger_timeout_ms=trigger_timeout_ms,
+        )
     print_success(f"{len(cap.samples)} samples @ {cap.interval_us}µs (ch=GP0..GP7)")
+    if decode == "uart":
+        print_info(f"Decoding UART @ {baud} baud (rx=GP{rx})")
 
     if vcd_path is not None:
         Path(vcd_path).write_text(samples_to_vcd(cap.samples, cap.interval_us))

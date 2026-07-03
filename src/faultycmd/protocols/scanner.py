@@ -688,6 +688,8 @@ class ScannerClient:
         max_samples: int,
         timeout_s: float = 10.0,
         binary: bool = False,
+        trigger_ch: int | None = None,
+        trigger_timeout_ms: int | None = None,
     ) -> LaCapture:
         """Capture a raw GP0..GP7 trace via the firmware logic analyzer.
 
@@ -696,11 +698,24 @@ class ScannerClient:
         ``faultycat-firmware/docs/LOGIC_ANALYZER.md``). See
         ``_capture_la_stream`` for the reply-framing details and the
         meaning of `binary`.
+
+        `trigger_ch`, if given, blocks the capture window's start until
+        that channel goes low, then backs it up with pre-trigger history
+        (firmware ``cmd_la``'s ``trig=<ch>[:<timeout_ms>]``) — see
+        ``LA_CAPTURE_TRIGGER_IMPLEMENTATION_PLAN.md``. `trigger_timeout_ms`
+        bounds that wait; a firmware-side default applies if omitted. A
+        firmware ``LA: ERR trigger_timeout`` reply surfaces as a
+        ``ScannerError`` via the existing `` ERR `` check below — no
+        special-casing needed here.
         """
         ser = self._require_serial()
         cmd = f"la {interval_us} {max_samples}"
         if binary:
             cmd += " bin"
+        if trigger_ch is not None:
+            cmd += f" trig={trigger_ch}"
+            if trigger_timeout_ms is not None:
+                cmd += f":{trigger_timeout_ms}"
         m, samples = self._capture_la_stream(
             ser,
             cmd,
