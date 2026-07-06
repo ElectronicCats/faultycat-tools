@@ -1087,13 +1087,18 @@ def uart_console(
         disconnect_error: list[Exception] = []
 
         def _pump_serial_to_stdout() -> None:
+            # Catch broadly (not just SerialException): this runs in a
+            # daemon thread, so any unhandled exception here (e.g. a
+            # BrokenPipeError writing to stdout) would otherwise kill the
+            # thread silently, leaving the main loop reading stdin forever
+            # with no indication the bridge died.
             try:
                 while not stop.is_set():
                     chunk = ser.read(64)
                     if chunk:
                         sys.stdout.buffer.write(chunk)
                         sys.stdout.buffer.flush()
-            except serial.SerialException as exc:
+            except Exception as exc:
                 disconnect_error.append(exc)
                 stop.set()
 
@@ -1117,7 +1122,7 @@ def uart_console(
                 print_success(control.uart_exit())
             if disconnect_error:
                 raise click.ClickException(
-                    f"Target UART disconnected: {disconnect_error[0]}"
+                    f"Target UART bridge error: {disconnect_error[0]}"
                 )
 
 
@@ -1668,6 +1673,13 @@ def _wrap_main() -> None:
     except KeyboardInterrupt:
         print_dim("Aborted by user.")
         raise SystemExit(130) from None
+    except Exception as e:
+        # Fallback for anything not explicitly anticipated above (e.g. a
+        # RuntimeError from the protocol layer's "client not open" guard,
+        # or a bug). Exit code 70 (EX_SOFTWARE, sysexits.h) distinguishes
+        # this from the deliberate application-error codes used above.
+        print_error(f"unexpected error: {type(e).__name__}: {e}")
+        raise SystemExit(70) from e
 
 
 if __name__ == "__main__":
