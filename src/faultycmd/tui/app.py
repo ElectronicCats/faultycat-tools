@@ -685,6 +685,26 @@ class FaultycmdTUI(App[None]):
     def _note_error(self, msg: str) -> None:
         self.notify(msg, severity="warning", timeout=2)
 
+    def _dispatch(self, lock, exc_types, label: str, task, show) -> None:
+        """Run `task()` on a daemon thread with `lock` held across the
+        call, then post an `OK <label>` / `<label>: <err>` line to
+        `show` on the UI thread. Shared by the EMFI/Crowbar/Campaign
+        modal callbacks (apply/arm/fire/disarm/configure/start/stop) —
+        the dispatch shape is identical across all three; only the
+        lock, exception tuple, and task differ per engine."""
+
+        def worker() -> None:
+            try:
+                with lock:
+                    task()
+            except exc_types as e:
+                err = str(e)
+                self._post(show, f"{label}: {err}")
+            else:
+                self._post(show, f"OK {label}")
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def _run_scanner_task(self, scanner_fn, *args, result_cb=None, **kwargs):
         """Run a scanner command in a background thread while temporarily
         dropping the CDC2 diag tail so the scanner shell can own the
@@ -852,23 +872,13 @@ class FaultycmdTUI(App[None]):
             modal._set_status(text)
 
         def _run(label: str, task) -> None:
-            """Dispatch a CDC0 op to a daemon thread. Holds
-            `cdc0_lock` across the call and posts an `OK <label>` /
-            `<label>: <err>` line back to the modal status. Mirror
-            of `action_open_crowbar_modal._run` for CDC1 — the
-            Textual event loop is never blocked on USB I/O."""
-
-            def worker() -> None:
-                try:
-                    with self.conn.cdc0_lock:
-                        task()
-                except (ProtocolError, EngineError, OSError) as e:
-                    err = str(e)
-                    self._post(_show, f"{label}: {err}")
-                else:
-                    self._post(_show, f"OK {label}")
-
-            threading.Thread(target=worker, daemon=True).start()
+            self._dispatch(
+                self.conn.cdc0_lock,
+                (ProtocolError, EngineError, OSError),
+                label,
+                task,
+                _show,
+            )
 
         def _on_apply(state: EmfiFormState) -> None:
             # `EmfiFormState.trigger` is a string for Select-widget
@@ -986,26 +996,13 @@ class FaultycmdTUI(App[None]):
             modal._set_status(text)
 
         def _run(label: str, task) -> None:
-            """Dispatch a CDC1 op to a daemon thread. Holds
-            `cdc1_shared.lock` across the call and posts an
-            `OK <label>` / `<label>: <err>` line back to the modal
-            status. The Textual event loop is never blocked — same
-            offload as `action_open_campaign_modal._run`, needed
-            because the daemon `_poll_cdc1` may hold the lock for a
-            full status round-trip and the UI thread would otherwise
-            freeze waiting on it."""
-
-            def worker() -> None:
-                try:
-                    with self.conn.cdc1_shared.lock:
-                        task()
-                except (EngineError, ProtocolError, OSError) as e:
-                    err = str(e)
-                    self._post(_show, f"{label}: {err}")
-                else:
-                    self._post(_show, f"OK {label}")
-
-            threading.Thread(target=worker, daemon=True).start()
+            self._dispatch(
+                self.conn.cdc1_shared.lock,
+                (EngineError, ProtocolError, OSError),
+                label,
+                task,
+                _show,
+            )
 
         def _on_apply(state: CrowbarFormState) -> None:
             def _task() -> None:
@@ -1082,22 +1079,13 @@ class FaultycmdTUI(App[None]):
             modal._set_status(text)
 
         def _run(label: str, task) -> None:
-            """Dispatch a CDC1 op to a daemon thread. Holds
-            `cdc1_shared.lock` across the call and posts an
-            `OK <label>` / `<label>: <err>` line back to the modal
-            status. The Textual event loop is never blocked."""
-
-            def worker() -> None:
-                try:
-                    with self.conn.cdc1_shared.lock:
-                        task()
-                except (CampaignError, EngineError, ProtocolError, OSError) as e:
-                    err = str(e)
-                    self._post(_show, f"{label}: {err}")
-                else:
-                    self._post(_show, f"OK {label}")
-
-            threading.Thread(target=worker, daemon=True).start()
+            self._dispatch(
+                self.conn.cdc1_shared.lock,
+                (CampaignError, EngineError, ProtocolError, OSError),
+                label,
+                task,
+                _show,
+            )
 
         def _on_configure(state: CampaignFormState) -> None:
             try:
