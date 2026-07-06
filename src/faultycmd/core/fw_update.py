@@ -140,7 +140,16 @@ def download_uf2(asset: ReleaseAsset) -> Path:
 
 
 def find_rp2040_mount_point() -> str | None:
-    """Find the RP2040 mass-storage mount point when in UF2 boot mode."""
+    """Find the RP2040 mass-storage mount point when in UF2 boot mode.
+
+    Only returns a path once it's an actual, writable mount — not just
+    a directory that happens to exist. udisks2 (and similar desktop
+    automounters) can briefly expose the mountpoint directory before
+    the filesystem is fully mounted and its permissions applied, and a
+    write attempted in that window fails with ``EACCES`` even though
+    the mount looks present. Requiring ``ismount()`` + ``W_OK`` avoids
+    both that race and stale, unmounted leftover directories.
+    """
     system = platform.system()
 
     if system == "Linux":
@@ -151,13 +160,13 @@ def find_rp2040_mount_point() -> str | None:
             "/mnt/RPI-RP2",
         ]
         for pattern in search_paths:
-            matches = glob.glob(pattern)
-            if matches:
-                return matches[0]
+            for match in glob.glob(pattern):
+                if os.path.ismount(match) and os.access(match, os.W_OK):
+                    return match
 
     elif system == "Darwin":  # macOS
         mount_path = "/Volumes/RPI-RP2"
-        if os.path.exists(mount_path):
+        if os.path.exists(mount_path) and os.access(mount_path, os.W_OK):
             return mount_path
 
     elif system == "Windows":
@@ -193,12 +202,33 @@ def wait_for_boot_mode(
     raise FirmwareUpdateError("timed out waiting for the RPI-RP2 boot device to appear")
 
 
+_FLASH_RETRY_ATTEMPTS = 5
+_FLASH_RETRY_DELAY_S = 1.0
+
+
 def flash_uf2(uf2_path: Path, mount_point: str) -> None:
-    """Copy ``uf2_path`` onto the detected RPI-RP2 mass-storage device."""
-    try:
-        shutil.copy2(uf2_path, os.path.join(mount_point, uf2_path.name))
-    except OSError as e:
-        raise FirmwareUpdateError(f"could not copy UF2 to {mount_point}: {e}") from e
+    """Copy ``uf2_path`` onto the detected RPI-RP2 mass-storage device.
+
+    Retries a few times on ``PermissionError``: even after
+    :func:`find_rp2040_mount_point` confirms the mount is writable,
+    some automounters take a moment longer to finish applying it, and
+    the first write can still land in that trailing window.
+    """
+    dest = os.path.join(mount_point, uf2_path.name)
+    for attempt in range(1, _FLASH_RETRY_ATTEMPTS + 1):
+        try:
+            shutil.copy2(uf2_path, dest)
+            return
+        except PermissionError as e:
+            if attempt == _FLASH_RETRY_ATTEMPTS:
+                raise FirmwareUpdateError(
+                    f"could not copy UF2 to {mount_point}: {e}"
+                ) from e
+            time.sleep(_FLASH_RETRY_DELAY_S)
+        except OSError as e:
+            raise FirmwareUpdateError(
+                f"could not copy UF2 to {mount_point}: {e}"
+            ) from e
 
 
 def get_connected_firmware_version() -> tuple[int, int, int, int] | None:
