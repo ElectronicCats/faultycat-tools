@@ -11,10 +11,15 @@ been published yet, there's nothing to flash and the command says so.
 
 Flashing rides the RP2040's UF2 mass-storage bootloader: once the
 board is in boot mode it enumerates as a ``RPI-RP2`` USB drive, and
-copying the ``.uf2`` file there triggers the update. There is no
-shell verb to trigger that reboot remotely (unlike designs where an
-RP2040 bridges to a separate target MCU), so entering boot mode is
-always a manual, physical step here.
+copying the ``.uf2`` file there triggers the update. The firmware
+watches every CDC for a host opening it at 1200 baud (the same
+"magic baud" convention as pico-sdk's ``stdio_usb`` / ``picotool
+reboot -f -u`` — see ``tud_cdc_line_coding_cb`` in
+``faultycat-firmware/usb/src/usb_composite.c``) and drops to boot
+mode on its own, so :func:`check_and_update_firmware` tries that
+remote trigger first via :func:`trigger_boot_mode_remote`. Entering
+boot mode only falls back to a manual, physical button-press when no
+FaultyCat CDC is detected to touch.
 """
 
 from __future__ import annotations
@@ -231,6 +236,29 @@ def get_connected_firmware_version() -> tuple[int, int, int, int] | None:
     return None
 
 
+def trigger_boot_mode_remote() -> bool:
+    """Try the 1200-baud magic-touch to drop the board into UF2 boot mode.
+
+    Opening any FaultyCat CDC at 1200 baud makes the firmware's
+    ``tud_cdc_line_coding_cb`` call ``reset_usb_boot`` and reboot into
+    the RP2040's mass-storage bootloader on its own — no physical
+    button needed. Returns False (rather than raising) if no
+    FaultyCat CDC is present or the touch fails, so the caller can
+    fall back to the manual instructions.
+    """
+    import serial
+
+    ports = discover()
+    if not ports:
+        return False
+    try:
+        with serial.Serial(ports[0].device, baudrate=1200):
+            pass
+    except (OSError, serial.SerialException):
+        return False
+    return True
+
+
 def _print_boot_mode_instructions() -> None:
     print_warning("Put the FaultyCat into UF2 boot mode now.")
     print_dim("Consult your board's hardware docs for the exact button combo —")
@@ -292,7 +320,10 @@ def check_and_update_firmware(force: bool = False) -> bool:
 
     mount_point = find_rp2040_mount_point()
     if not mount_point:
-        _print_boot_mode_instructions()
+        if trigger_boot_mode_remote():
+            print_info("Sent remote boot-mode trigger (1200-baud touch)...")
+        else:
+            _print_boot_mode_instructions()
         try:
             mount_point = wait_for_boot_mode(timeout_s=30.0, on_progress=print_dim)
         except FirmwareUpdateError as e:
