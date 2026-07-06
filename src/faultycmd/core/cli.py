@@ -823,7 +823,7 @@ def scanner(ctx: click.Context, port: str | None) -> None:
     ctx.obj = port
 
 
-def _scanner_client(ctx: click.Context) -> ScannerClient:
+def _get_scanner_client(ctx: click.Context) -> ScannerClient:
     port = ctx.obj
     return ScannerClient(port) if port is not None else ScannerClient.discover()
 
@@ -848,7 +848,7 @@ def scanner_scan_swd(
     timeout_s: float,
 ) -> None:
     """Detect the target's SWD pins."""
-    with _scanner_client(ctx) as cli:
+    with _get_scanner_client(ctx) as cli:
         cli.scan_swd(
             targetsel_hex=targetsel,
             timeout_s=timeout_s,
@@ -869,11 +869,6 @@ def i2c(ctx: click.Context, port: str | None) -> None:
     ctx.obj = port
 
 
-def _i2c_client(ctx: click.Context) -> ScannerClient:
-    port = ctx.obj
-    return ScannerClient(port) if port is not None else ScannerClient.discover()
-
-
 @i2c.command("scan")
 @click.option(
     "--timeout-s",
@@ -885,7 +880,7 @@ def _i2c_client(ctx: click.Context) -> ScannerClient:
 @click.pass_context
 def i2c_scan(ctx: click.Context, timeout_s: float) -> None:
     """Detect the target's I2C SDA/SCL pins and ACKed addresses."""
-    with _i2c_client(ctx) as cli:
+    with _get_scanner_client(ctx) as cli:
         cli.scan_i2c(timeout_s=timeout_s, on_progress=console.print)
 
 
@@ -920,7 +915,7 @@ def i2c_probe(
     scanner-header channels can carry SDA/SCL), so when they're
     omitted this runs a full `i2c scan` first to find them.
     """
-    with _i2c_client(ctx) as cli:
+    with _get_scanner_client(ctx) as cli:
         sda, scl = _resolve_i2c_pins(cli, sda, scl, timeout_s=scan_timeout_s)
         for line in cli.i2c_probe(sda, scl, timeout_s=timeout_s):
             console.print(line)
@@ -944,11 +939,6 @@ def uart(ctx: click.Context, port: str | None) -> None:
     ctx.obj = port
 
 
-def _uart_control_client(ctx: click.Context) -> ScannerClient:
-    port = ctx.obj
-    return ScannerClient(port) if port is not None else ScannerClient.discover()
-
-
 @uart.command("enter")
 @click.option("--baud", type=int, default=115200, show_default=True)
 @click.option(
@@ -964,7 +954,7 @@ def _uart_control_client(ctx: click.Context) -> ScannerClient:
 @click.pass_context
 def uart_enter(ctx: click.Context, baud: int, parity: str, stop_bits: str) -> None:
     """Enable the bridge (CH0=TX/CH1=RX on the scanner header)."""
-    with _uart_control_client(ctx) as cli:
+    with _get_scanner_client(ctx) as cli:
         reply = cli.uart_enter(baud=baud, parity=parity, stop_bits=int(stop_bits))
     print_success(reply)
 
@@ -973,7 +963,7 @@ def uart_enter(ctx: click.Context, baud: int, parity: str, stop_bits: str) -> No
 @click.pass_context
 def uart_exit(ctx: click.Context) -> None:
     """Disable the bridge."""
-    with _uart_control_client(ctx) as cli:
+    with _get_scanner_client(ctx) as cli:
         reply = cli.uart_exit()
     print_success(reply)
 
@@ -982,7 +972,7 @@ def uart_exit(ctx: click.Context) -> None:
 @click.pass_context
 def uart_status(ctx: click.Context) -> None:
     """Show the current bridge configuration."""
-    with _uart_control_client(ctx) as cli:
+    with _get_scanner_client(ctx) as cli:
         reply = cli.uart_status()
     print_info(reply)
 
@@ -992,7 +982,7 @@ def uart_status(ctx: click.Context) -> None:
 @click.pass_context
 def uart_baud(ctx: click.Context, value: int) -> None:
     """Reconfigure the baud rate of a live bridge."""
-    with _uart_control_client(ctx) as cli:
+    with _get_scanner_client(ctx) as cli:
         reply = cli.uart_set_baud(value)
     print_success(reply)
 
@@ -1002,7 +992,7 @@ def uart_baud(ctx: click.Context, value: int) -> None:
 @click.pass_context
 def uart_parity(ctx: click.Context, value: str) -> None:
     """Reconfigure the parity of a live bridge."""
-    with _uart_control_client(ctx) as cli:
+    with _get_scanner_client(ctx) as cli:
         reply = cli.uart_set_parity(value)
     print_success(reply)
 
@@ -1012,7 +1002,7 @@ def uart_parity(ctx: click.Context, value: str) -> None:
 @click.pass_context
 def uart_stopbits(ctx: click.Context, value: str) -> None:
     """Reconfigure the stop bits of a live bridge."""
-    with _uart_control_client(ctx) as cli:
+    with _get_scanner_client(ctx) as cli:
         reply = cli.uart_set_stopbits(int(value))
     print_success(reply)
 
@@ -1076,7 +1066,7 @@ def uart_console(
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
-    control = _uart_control_client(ctx)
+    control = _get_scanner_client(ctx)
     with control:
         # A second `uart enter` while one is already running gets
         # `ERR busy` from the firmware (the pins are already owned by
@@ -1151,11 +1141,6 @@ def uart_console(
 def la(ctx: click.Context, port: str | None) -> None:
     """Protocol-agnostic logic analyzer (captures GP0..GP7)."""
     ctx.obj = port
-
-
-def _la_client(ctx: click.Context) -> ScannerClient:
-    port = ctx.obj
-    return ScannerClient(port) if port is not None else ScannerClient.discover()
 
 
 @la.command("capture")
@@ -1316,7 +1301,7 @@ def la_capture(
         # than --timeout-s must not make the host give up first.
         la_call_timeout_s = max(timeout_s, effective_trigger_timeout_s)
 
-    with _la_client(ctx) as cli:
+    with _get_scanner_client(ctx) as cli:
         cap = cli.la(
             interval_us,
             n,
@@ -1398,7 +1383,7 @@ def la_pulseview(ctx: click.Context, open_pulseview: bool) -> None:
     releases the port automatically, so re-run this command (with
     --no-pulseview) once you're done to force the release.
     """
-    with _la_client(ctx) as cli:
+    with _get_scanner_client(ctx) as cli:
         reply = cli.la_sump_arm()
         port = cli.port
     print_success(reply)
