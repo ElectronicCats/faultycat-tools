@@ -1,0 +1,2 @@
+# Permiso para el compuesto USB de FaultyCat (CDC0-3: emfi, crowbar, scanner/uart)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="fa17", MODE="0660", GROUP="dialout", TAG+="uaccess"

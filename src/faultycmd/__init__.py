@@ -6,4 +6,25 @@ clients live in :mod:`faultycmd.core.framing` and per-protocol modules
 under :mod:`faultycmd.protocols`.
 """
 
-__version__ = "3.0.0.5"
+import sys
+from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
+
+
+def _read_version_file() -> str | None:
+    # Checks the PyInstaller bundle root first, then the repo's VERSION
+    # file (this package lives at <repo>/src/faultycmd/__init__.py).
+    candidates = [
+        Path(getattr(sys, "_MEIPASS", "")) / "VERSION",
+        Path(__file__).resolve().parents[2] / "VERSION",
+    ]
+    for path in candidates:
+        if path.is_file():
+            return path.read_text(encoding="utf-8").strip()
+    return None
+
+
+try:
+    __version__ = version("faultycmd")
+except PackageNotFoundError:
+    __version__ = _read_version_file() or "0.0.0"

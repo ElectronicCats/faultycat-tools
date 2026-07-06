@@ -27,6 +27,8 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Select, Static
 
+from ..utils.triplet import parse_triplet
+
 # -----------------------------------------------------------------
 # EMFI form state
 # -----------------------------------------------------------------
@@ -41,8 +43,22 @@ _EMFI_TRIGGERS = (
 )
 
 
+class _DictFormMixin:
+    """Shared from_dict/to_dict for the form-state dataclasses below."""
+
+    @classmethod
+    def from_dict(cls, d: dict):
+        # Filter unknown keys + fill defaults for missing.
+        known = {f.name for f in fields(cls)}
+        kwargs = {k: v for k, v in d.items() if k in known}
+        return cls(**kwargs)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
 @dataclass
-class EmfiFormState:
+class EmfiFormState(_DictFormMixin):
     trigger: str = "immediate"
     delay_us: int = 0
     width_us: int = 5
@@ -51,16 +67,6 @@ class EmfiFormState:
     # external trigger before reporting CROWBAR_ERR_TRIGGER_TIMEOUT.
     # 0 = wait forever (firmware semantics, see emfi_campaign.c).
     trigger_timeout_ms: int = 60000
-
-    @classmethod
-    def from_dict(cls, d: dict) -> EmfiFormState:
-        # Filter unknown keys + fill defaults for missing.
-        known = {f.name for f in fields(cls)}
-        kwargs = {k: v for k, v in d.items() if k in known}
-        return cls(**kwargs)
-
-    def to_dict(self) -> dict:
-        return asdict(self)
 
     def validate(self) -> None:
         if self.trigger not in _EMFI_TRIGGERS:
@@ -82,6 +88,16 @@ class EmfiFormState:
                 f"trigger_timeout_ms must be >= 0 (0 = wait forever), "
                 f"got {self.trigger_timeout_ms}"
             )
+
+
+class _StatusLineMixin:
+    """Shared `#status_line` updater for the control modals below."""
+
+    def _set_status(self, msg: str) -> None:
+        try:
+            self.query_one("#status_line", Static).update(msg)
+        except Exception:
+            pass
 
 
 # -----------------------------------------------------------------
@@ -143,7 +159,7 @@ class HvConfirmModal(ModalScreen[bool]):
 _HV_CONFIRM_ACTIONS = frozenset({"arm"})
 
 
-class EmfiControlModal(ModalScreen[None]):
+class EmfiControlModal(_StatusLineMixin, ModalScreen[None]):
     """EMFI configure / arm / fire / disarm + capture viewer.
 
     The modal owns its own form state (`self.state: EmfiFormState`)
@@ -255,12 +271,6 @@ class EmfiControlModal(ModalScreen[None]):
         self.state = candidate
         return True
 
-    def _set_status(self, msg: str) -> None:
-        try:
-            self.query_one("#status_line", Static).update(msg)
-        except Exception:
-            pass
-
     # -- actions ---------------------------------------------------
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -334,42 +344,13 @@ class EmfiControlModal(ModalScreen[None]):
 _CAMPAIGN_ENGINES = ("crowbar",)  # F11-0c MVP — emfi multiplex deferred
 
 
-def parse_triplet(s: str) -> tuple[int, int, int]:
-    """Accept ``"START:END:STEP"`` or a single ``"N"`` (collapses
-    axis). Returns ``(start, end, step)``; raises ValueError on a
-    malformed input or a non-monotonic / negative span."""
-    parts = s.strip().split(":")
-    if len(parts) == 1:
-        n = int(parts[0])
-        return (n, n, 0)
-    if len(parts) != 3:
-        raise ValueError(f"triplet must be 'START:END:STEP' or single 'N', got {s!r}")
-    start, end, step = (int(p) for p in parts)
-    if start > end:
-        raise ValueError(f"triplet start ({start}) must be <= end ({end})")
-    if start != end and step <= 0:
-        raise ValueError(
-            f"triplet step must be > 0 when start ({start}) != end ({end})"
-        )
-    return (start, end, step)
-
-
 @dataclass
-class CampaignFormState:
+class CampaignFormState(_DictFormMixin):
     engine: str = "crowbar"
     delay: str = "1000:3000:1000"  # µs (text triplet, parsed on validate)
     width: str = "200:300:100"  # ns for crowbar, µs for emfi
     power: str = "1:1:0"  # crowbar 1=LP / 2=HP
     settle_ms: int = 50
-
-    @classmethod
-    def from_dict(cls, d: dict) -> CampaignFormState:
-        known = {f.name for f in fields(cls)}
-        kwargs = {k: v for k, v in d.items() if k in known}
-        return cls(**kwargs)
-
-    def to_dict(self) -> dict:
-        return asdict(self)
 
     def parse(
         self,
@@ -395,7 +376,7 @@ class CampaignFormState:
         self.parse()
 
 
-class CampaignControlModal(ModalScreen[None]):
+class CampaignControlModal(_StatusLineMixin, ModalScreen[None]):
     """Campaign full-sweep configure / start / stop / drain.
 
     Replaces the F10 dashboard's `s` toggle-demo (locked to a
@@ -503,12 +484,6 @@ class CampaignControlModal(ModalScreen[None]):
         self.state = candidate
         return True
 
-    def _set_status(self, msg: str) -> None:
-        try:
-            self.query_one("#status_line", Static).update(msg)
-        except Exception:
-            pass
-
     def on_button_pressed(self, event: Button.Pressed) -> None:
         # Each callback dispatches the CDC1 op to a daemon thread
         # (see `tui.action_open_campaign_modal._run`) so the Textual
@@ -570,7 +545,7 @@ _CROWBAR_OUTPUTS = ("lp", "hp")  # NONE excluded — form must pick a real path
 
 
 @dataclass
-class CrowbarFormState:
+class CrowbarFormState(_DictFormMixin):
     trigger: str = "immediate"
     output: str = "lp"
     delay_us: int = 0
@@ -579,15 +554,6 @@ class CrowbarFormState:
     # external trigger before reporting CROWBAR_ERR_TRIGGER_TIMEOUT.
     # 0 = wait forever (firmware semantics, see crowbar_campaign.c).
     trigger_timeout_ms: int = 60000
-
-    @classmethod
-    def from_dict(cls, d: dict) -> CrowbarFormState:
-        known = {f.name for f in fields(cls)}
-        kwargs = {k: v for k, v in d.items() if k in known}
-        return cls(**kwargs)
-
-    def to_dict(self) -> dict:
-        return asdict(self)
 
     def validate(self) -> None:
         if self.trigger not in _CROWBAR_TRIGGERS:
@@ -611,7 +577,7 @@ class CrowbarFormState:
             )
 
 
-class CrowbarControlModal(ModalScreen[None]):
+class CrowbarControlModal(_StatusLineMixin, ModalScreen[None]):
     """Crowbar configure / arm / fire / disarm.
 
     Unlike EMFI, no action involves the HV cap — the crowbar gates
@@ -717,12 +683,6 @@ class CrowbarControlModal(ModalScreen[None]):
         self.state = candidate
         return True
 
-    def _set_status(self, msg: str) -> None:
-        try:
-            self.query_one("#status_line", Static).update(msg)
-        except Exception:
-            pass
-
     def on_button_pressed(self, event: Button.Pressed) -> None:
         # Each callback dispatches the CDC1 op to a daemon thread
         # (see `tui.action_open_crowbar_modal._run`) so the Textual
@@ -780,23 +740,14 @@ class CrowbarControlModal(ModalScreen[None]):
 
 
 @dataclass
-class ScannerFormState:
+class ScannerFormState(_DictFormMixin):
     """No tunables for ``scan swd`` (the firmware drives the full
     P(8,2)=56 sweep with a fixed 30 s timeout). The dataclass is
     kept so the dashboard's persistence layer has something to
     serialize without raising KeyError on existing config files."""
 
-    @classmethod
-    def from_dict(cls, d: dict) -> ScannerFormState:
-        known = {f.name for f in fields(cls)}
-        kwargs = {k: v for k, v in d.items() if k in known}
-        return cls(**kwargs)
 
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-
-class ScannerControlModal(ModalScreen[None]):
+class ScannerControlModal(_StatusLineMixin, ModalScreen[None]):
     """``scan swd`` over CDC2's text shell.
 
     The dashboard wires ``scan_swd_cb`` through ``_run_scanner_task``,
@@ -829,16 +780,19 @@ class ScannerControlModal(ModalScreen[None]):
         *,
         initial: ScannerFormState | None = None,
         scan_swd_cb=None,
+        scan_i2c_cb=None,
     ) -> None:
         super().__init__()
         self.state = initial or ScannerFormState()
         self.scan_swd_cb = scan_swd_cb
+        self.scan_i2c_cb = scan_i2c_cb
 
     def compose(self) -> ComposeResult:
         with Vertical():
-            yield Label("Scanner / SWD control")
-            yield Label("[dim]CDC2 · F8-2 scan swd[/dim]")
+            yield Label("Scanner / SWD + I2C control")
+            yield Label("[dim]CDC2 · F8-2 scan swd / scan i2c[/dim]")
             yield Label("[bold]scan swd[/bold] — bus-wide discovery (timeout 30 s)")
+            yield Label("[bold]scan i2c[/bold] — bus-wide discovery (timeout 30 s)")
             yield Label(
                 "[dim]JTAG and direct-SWD verbs are WIP and hidden in "
                 "this release.[/dim]"
@@ -846,13 +800,8 @@ class ScannerControlModal(ModalScreen[None]):
             yield Static("", id="status_line")
             with Horizontal():
                 yield Button("Scan SWD", id="apply_scan_swd", variant="primary")
+                yield Button("Scan I2C", id="apply_scan_i2c", variant="primary")
                 yield Button("Close", id="close")
-
-    def _set_status(self, msg: str) -> None:
-        try:
-            self.query_one("#status_line", Static).update(msg)
-        except Exception:
-            pass
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         bid = event.button.id or ""
@@ -867,6 +816,14 @@ class ScannerControlModal(ModalScreen[None]):
                 self._set_status("scan-swd dispatched…")
             except Exception as e:
                 self._set_status(f"scan-swd: {e}")
+        elif bid == "apply_scan_i2c":
+            if self.scan_i2c_cb is None:
+                return
+            try:
+                self.scan_i2c_cb()
+                self._set_status("scan-i2c dispatched…")
+            except Exception as e:
+                self._set_status(f"scan-i2c: {e}")
 
     def action_close(self) -> None:
         self.dismiss(None)

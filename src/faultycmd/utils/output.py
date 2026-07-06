@@ -15,6 +15,7 @@ STYLES = {
     "dim": Style(dim=True),
     "prompt": Style(color="magenta", bold=True),
     "device": Style(color="cyan"),
+    "highlight": Style(color="magenta", bold=True),
 }
 
 console = Console()

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "faultycmd"
-version = "3.0.0.5"
+dynamic = ["version"]
 description = "Host tool for FaultyCat v3 — click+Rich CLI and Textual TUI for EMFI / crowbar / SWD / JTAG / scanner / campaign over the USB composite."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -31,6 +31,7 @@ dependencies = [
     "click>=8.1",
     "rich>=13.0",
     "textual>=0.40",
+    "requests>=2.28",
 ]
 
 [project.optional-dependencies]
@@ -57,6 +58,10 @@ faultycmd = "faultycmd.core.cli:_wrap_main"
 [project.urls]
 Homepage = "https://github.com/ElectronicCats/faultycat"
 "Bug Tracker" = "https://github.com/ElectronicCats/faultycat/issues"
+
+[tool.hatch.version]
+path = "VERSION"
+pattern = "(?P<version>.+)"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/faultycmd"]

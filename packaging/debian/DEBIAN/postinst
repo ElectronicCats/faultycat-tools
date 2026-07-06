@@ -1,0 +1,29 @@
+#!/bin/sh
+set -e
+
+# faultycmd post-installation script
+
+case "$1" in
+    configure)
+        if ! getent group dialout >/dev/null; then
+            echo "Creating group dialout..."
+            groupadd -r dialout || true
+        fi
+
+        if [ -x /sbin/udevadm ]; then
+            echo "Reloading udev rules..."
+            udevadm control --reload-rules || true
+            udevadm trigger || true
+        fi
+    ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+    ;;
+
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+    ;;
+esac
+
+exit 0

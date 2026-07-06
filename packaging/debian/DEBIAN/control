@@ -1,0 +1,12 @@
+Package: faultycmd
+Version: 1.0.0
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: Electronic Cats <support@electroniccats.com>
+Depends: libc6
+Homepage: https://github.com/ElectronicCats/faultycat
+Description: Host tool for FaultyCat v3 — EMFI / crowbar / SWD / JTAG fault injection
+ faultycmd is the click+Rich CLI and Textual TUI for driving the FaultyCat v3
+ fault-injection board over its USB CDC composite interface (EMFI, crowbar,
+ SWD/JTAG scanner, and campaign sweeps).

@@ -82,11 +82,7 @@ from .modals import (
     ScannerFormState,
 )
 from ..core.usb import PortDiscoveryError, cdc_for
-from ..utils.version_check import (
-    VersionMismatchError,
-    allow_mismatch,
-    host_version_tuple,
-)
+from ..utils.version_check import EXPECTED_BOARD, VersionMismatchError, allow_mismatch
 
 # -----------------------------------------------------------------------------
 # Diag snapshot parser — matches the line emitted every 500 ms by
@@ -473,13 +469,13 @@ class FaultycmdTUI(App[None]):
             tag = "fw ?"
         else:
             fw_str = ".".join(str(v) for v in fw)
-            matched = fw == host_version_tuple()
+            matched = fw[0] == EXPECTED_BOARD
             if matched:
                 tag = f"fw v{fw_str} ✓"
             elif allow_mismatch():
-                tag = f"fw v{fw_str} (mismatch — override active)"
+                tag = f"fw v{fw_str} (wrong board — override active)"
             else:
-                tag = f"fw v{fw_str} ✗ (host v{__version__})"
+                tag = f"fw v{fw_str} ✗ (expects board {EXPECTED_BOARD})"
         self.sub_title = f"host v{__version__}  ·  {tag}"
 
     def on_unmount(self) -> None:
@@ -612,6 +608,13 @@ class FaultycmdTUI(App[None]):
                     snap = DiagSnapshot.parse(line)
                     if snap is not None:
                         self._post(self._update_diag, snap)
+            except TypeError:
+                # force_close_serials() can null out the underlying fd
+                # while this thread is mid-read() on shutdown — pyserial
+                # then raises TypeError instead of OSError. Treat it the
+                # same as a closed port: the loop condition will exit on
+                # the next pass since _stop_workers is set first.
+                break
             except OSError as e:
                 self._post(self._note_error, f"diag: {e}")
                 self._stop_workers.wait(1.0)
@@ -623,8 +626,8 @@ class FaultycmdTUI(App[None]):
             return
         self.emfi_panel.update_fields(
             {
-                "state": st.state.name if hasattr(st.state, "name") else str(st.state),
-                "err": st.err.name if hasattr(st.err, "name") else str(st.err),
+                "state": getattr(st.state, "name", str(st.state)),
+                "err": getattr(st.err, "name", str(st.err)),
                 "last_fire_ms": str(st.last_fire_at_ms),
                 "capture_fill": str(st.capture_fill),
                 "width_us": str(st.pulse_width_us_actual),
@@ -637,14 +640,12 @@ class FaultycmdTUI(App[None]):
             return
         self.crowbar_panel.update_fields(
             {
-                "state": st.state.name if hasattr(st.state, "name") else str(st.state),
-                "err": st.err.name if hasattr(st.err, "name") else str(st.err),
+                "state": getattr(st.state, "name", str(st.state)),
+                "err": getattr(st.err, "name", str(st.err)),
                 "last_fire_ms": str(st.last_fire_at_ms),
                 "width_ns": str(st.pulse_width_ns_actual),
                 "delay_us": str(st.delay_us_actual),
-                "output": (
-                    st.output.name if hasattr(st.output, "name") else str(st.output)
-                ),
+                "output": getattr(st.output, "name", str(st.output)),
             }
         )
 
@@ -653,8 +654,8 @@ class FaultycmdTUI(App[None]):
             return
         self.campaign_panel.set_summary(
             {
-                "state": st.state.name if hasattr(st.state, "name") else str(st.state),
-                "err": st.err.name if hasattr(st.err, "name") else str(st.err),
+                "state": getattr(st.state, "name", str(st.state)),
+                "err": getattr(st.err, "name", str(st.err)),
                 "step": f"{st.step_n}/{st.total_steps}",
                 "pushed": str(st.results_pushed),
                 "dropped": str(st.results_dropped),
@@ -683,6 +684,26 @@ class FaultycmdTUI(App[None]):
 
     def _note_error(self, msg: str) -> None:
         self.notify(msg, severity="warning", timeout=2)
+
+    def _dispatch(self, lock, exc_types, label: str, task, show) -> None:
+        """Run `task()` on a daemon thread with `lock` held across the
+        call, then post an `OK <label>` / `<label>: <err>` line to
+        `show` on the UI thread. Shared by the EMFI/Crowbar/Campaign
+        modal callbacks (apply/arm/fire/disarm/configure/start/stop) —
+        the dispatch shape is identical across all three; only the
+        lock, exception tuple, and task differ per engine."""
+
+        def worker() -> None:
+            try:
+                with lock:
+                    task()
+            except exc_types as e:
+                err = str(e)
+                self._post(show, f"{label}: {err}")
+            else:
+                self._post(show, f"OK {label}")
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _run_scanner_task(self, scanner_fn, *args, result_cb=None, **kwargs):
         """Run a scanner command in a background thread while temporarily
@@ -754,9 +775,10 @@ class FaultycmdTUI(App[None]):
         threading.Thread(target=worker, daemon=True).start()
 
     def action_open_scanner_modal(self) -> None:
-        """F11-0d (reduced): opens the SWD scan modal. Only ``scan swd``
-        is exposed in this release; the JTAG / direct-SWD verbs are WIP
-        and hidden. The scan callback is wrapped in `_run_scanner_task`
+        """F11-0d (reduced): opens the SWD/I2C scan modal. ``scan swd``
+        and ``scan i2c`` are exposed in this release; the JTAG /
+        direct-SWD verbs are WIP and hidden. The scan callback is
+        wrapped in `_run_scanner_task`
         so the CDC2 diag tail is paused while the scanner shell client
         owns the port. The raw scan output (MATCH / NO_MATCH lines)
         lands in the modal status line — no follow-up auto-init prompt
@@ -777,9 +799,16 @@ class FaultycmdTUI(App[None]):
                 result_cb=_show_in_modal,
             )
 
+        def _on_scan_i2c() -> None:
+            self._run_scanner_task(
+                lambda s: s.scan_i2c(timeout_s=30.0),
+                result_cb=_show_in_modal,
+            )
+
         modal = ScannerControlModal(
             initial=initial,
             scan_swd_cb=_on_scan_swd,
+            scan_i2c_cb=_on_scan_i2c,
         )
         self.push_screen(modal)
 
@@ -843,23 +872,13 @@ class FaultycmdTUI(App[None]):
             modal._set_status(text)
 
         def _run(label: str, task) -> None:
-            """Dispatch a CDC0 op to a daemon thread. Holds
-            `cdc0_lock` across the call and posts an `OK <label>` /
-            `<label>: <err>` line back to the modal status. Mirror
-            of `action_open_crowbar_modal._run` for CDC1 — the
-            Textual event loop is never blocked on USB I/O."""
-
-            def worker() -> None:
-                try:
-                    with self.conn.cdc0_lock:
-                        task()
-                except (ProtocolError, EngineError, OSError) as e:
-                    err = str(e)
-                    self._post(_show, f"{label}: {err}")
-                else:
-                    self._post(_show, f"OK {label}")
-
-            threading.Thread(target=worker, daemon=True).start()
+            self._dispatch(
+                self.conn.cdc0_lock,
+                (ProtocolError, EngineError, OSError),
+                label,
+                task,
+                _show,
+            )
 
         def _on_apply(state: EmfiFormState) -> None:
             # `EmfiFormState.trigger` is a string for Select-widget
@@ -977,26 +996,13 @@ class FaultycmdTUI(App[None]):
             modal._set_status(text)
 
         def _run(label: str, task) -> None:
-            """Dispatch a CDC1 op to a daemon thread. Holds
-            `cdc1_shared.lock` across the call and posts an
-            `OK <label>` / `<label>: <err>` line back to the modal
-            status. The Textual event loop is never blocked — same
-            offload as `action_open_campaign_modal._run`, needed
-            because the daemon `_poll_cdc1` may hold the lock for a
-            full status round-trip and the UI thread would otherwise
-            freeze waiting on it."""
-
-            def worker() -> None:
-                try:
-                    with self.conn.cdc1_shared.lock:
-                        task()
-                except (EngineError, ProtocolError, OSError) as e:
-                    err = str(e)
-                    self._post(_show, f"{label}: {err}")
-                else:
-                    self._post(_show, f"OK {label}")
-
-            threading.Thread(target=worker, daemon=True).start()
+            self._dispatch(
+                self.conn.cdc1_shared.lock,
+                (EngineError, ProtocolError, OSError),
+                label,
+                task,
+                _show,
+            )
 
         def _on_apply(state: CrowbarFormState) -> None:
             def _task() -> None:
@@ -1073,22 +1079,13 @@ class FaultycmdTUI(App[None]):
             modal._set_status(text)
 
         def _run(label: str, task) -> None:
-            """Dispatch a CDC1 op to a daemon thread. Holds
-            `cdc1_shared.lock` across the call and posts an
-            `OK <label>` / `<label>: <err>` line back to the modal
-            status. The Textual event loop is never blocked."""
-
-            def worker() -> None:
-                try:
-                    with self.conn.cdc1_shared.lock:
-                        task()
-                except (CampaignError, EngineError, ProtocolError, OSError) as e:
-                    err = str(e)
-                    self._post(_show, f"{label}: {err}")
-                else:
-                    self._post(_show, f"OK {label}")
-
-            threading.Thread(target=worker, daemon=True).start()
+            self._dispatch(
+                self.conn.cdc1_shared.lock,
+                (CampaignError, EngineError, ProtocolError, OSError),
+                label,
+                task,
+                _show,
+            )
 
         def _on_configure(state: CampaignFormState) -> None:
             try:
