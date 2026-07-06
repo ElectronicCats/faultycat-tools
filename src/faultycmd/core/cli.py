@@ -1453,7 +1453,7 @@ def completion() -> None:
     """Install shell tab completion for faultycmd."""
 
 
-@completion.command("install")
+@click.command("install")
 @click.option(
     "--shell",
     type=click.Choice(["bash", "zsh", "fish"]),
@@ -1469,10 +1469,6 @@ def completion_install(shell: str | None) -> None:
         faultycmd completion install          # auto-detect shell
         faultycmd completion install --shell zsh
     """
-    if platform.system() == "Windows":
-        print_error("Shell completion is not supported on Windows.")
-        raise SystemExit(1)
-
     faultycmd_bin = shutil.which("faultycmd")
     if not faultycmd_bin:
         print_error("'faultycmd' not found on PATH.")
@@ -1552,6 +1548,10 @@ def completion_install(shell: str | None) -> None:
         print_dim("source ~/.zshrc && compinit -u")
     else:
         print_info("Completion is active immediately in new fish sessions.")
+
+
+if platform.system() != "Windows":
+    completion.add_command(completion_install)
 
 
 # -----------------------------------------------------------------------------
