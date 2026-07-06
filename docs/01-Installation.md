@@ -170,7 +170,7 @@ faultycmd devices    # lists the 4 CDC interfaces FaultyCat exposes
 faultycmd verify     # smoke-tests EMFI, crowbar, scanner, and target-UART
 ```
 
-See [03-Usage-Guide.md](03-Usage-Guide.md) for what these commands report.
+See [02-Usage-Guide.md](02-Usage-Guide.md) for what these commands report.
 
 ---
 

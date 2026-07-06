@@ -35,30 +35,39 @@ building the public wiki — it favors accuracy and coverage over polish.
 
 ## Recent Changes (this update)
 
-[TODO: list the headline changes from this release for the support team —
-e.g. the i2c_scanner branch work: I2C auto-discovery of SDA/SCL, the
-protocol-agnostic logic analyzer being unified under its own top-level
-`la` command (`la capture` / `la pulseview`, no longer nested under `i2c`
-or `uart`), the Windows SUMP/DTR grace-period fix, plus the internal
-refactors (status-line mixin, dict-form mixin, getattr cleanups). Recent
-commit titles on this branch (`i2c_scanner`) suggest this list but should
-be confirmed/expanded by whoever is closest to the release.]
+Headline changes on this branch (`i2c_scanner`) since it diverged from `main`:
+
+- **I2C bus tools**: `i2c scan`/`i2c probe` with auto-discovery of SDA/SCL
+  across all 8 scanner-header channels.
+- **Logic analyzer unified under `la`**: `la capture` (raw GP0..GP7 capture,
+  optional on-device I2C/UART decode, VCD export) and `la pulseview` (SUMP/
+  OLS mode for PulseView/sigrok) are now their own top-level command group,
+  no longer nested under `i2c`/`uart`.
+- **`la capture` trigger support**: `--trigger`/`--trigger-ch`/
+  `--trigger-timeout-s` delay the capture window until a channel goes low,
+  for reliable UART/I2C decode sync.
+- **Firmware update (`faultycmd update`)**: downloads and flashes the
+  `.uf2` release matching this host's version; now tries a remote
+  1200-baud boot-mode trigger before falling back to manual boot-mode
+  instructions.
+- **Windows SUMP/DTR reliability fix**: SUMP mode exit uses an explicit
+  protocol byte instead of relying on DTR, plus a grace period — see
+  [WINDOWS_SUMP_DTR_ISSUE.md](WINDOWS_SUMP_DTR_ISSUE.md).
+- **`faultycmd verify`**: new communication smoke-test command across all
+  interfaces.
+- **Cross-platform packaging**: `.deb`, `.pkg.tar.zst` (Arch), macOS
+  `.pkg`, Windows installer, plus shell completion install.
+- **Internal refactors**: shared sweep-axis parser reused by CLI and TUI,
+  a shared triplet-parsing utility, and TUI control-modal mixins
+  (status-line, dict-form) to cut duplication.
 
 ## Where to Go Next
 
 | Doc | What's in it |
 | --- | --- |
 | [01-Installation.md](01-Installation.md) | Per-OS install steps (packaged installers + from source), prerequisites, uninstall |
-| [02-Configuration.md](02-Configuration.md) | Environment variables, persisted state, version-parity check, port discovery, permissions |
-| [03-Usage-Guide.md](03-Usage-Guide.md) | Step-by-step workflows: devices/verify, EMFI, crowbar, campaign, scanner, I2C, UART, logic analyzer, TUI |
-| [04-Quick-Reference.md](04-Quick-Reference.md) | Full command table + exit codes |
-| [05-Troubleshooting.md](05-Troubleshooting.md) | Common failure modes and fixes |
+| [02-Usage-Guide.md](02-Usage-Guide.md) | Step-by-step workflows: devices/verify, EMFI, crowbar, campaign, scanner, I2C, UART, logic analyzer, TUI |
+| [03-Quick-Reference.md](03-Quick-Reference.md) | Full command table + exit codes |
+| [04-Troubleshooting.md](04-Troubleshooting.md) | Common failure modes and fixes |
 | [PULSEVIEW_SETUP.md](PULSEVIEW_SETUP.md) | Existing deep-dive: wiring PulseView to `la pulseview` |
 | [WINDOWS_SUMP_DTR_ISSUE.md](WINDOWS_SUMP_DTR_ISSUE.md) | Existing deep-dive: Windows DTR root-cause analysis (in Spanish) |
-
->[!Note]
-> The repository's top-level `README.md` currently describes the older,
-> general `CatSniffer-Tools` repo (catnip/cc2538-bsl/pycatsniffer_bv3) and
-> does not describe `faultycmd` or this project. [TODO: flag this to the
-> team — the README likely needs to be replaced with FaultyCat-specific
-> content; this doc set does not modify it.]

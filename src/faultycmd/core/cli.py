@@ -314,9 +314,10 @@ def update(force: bool) -> None:
     Host and firmware versions are released together — this fetches
     the .uf2 asset from the GitHub Release tagged to this host's
     version and flashes it over the RP2040's UF2 bootloader. If the
-    board isn't already in boot mode, you'll be prompted to put it
-    there (it enumerates as a ``RPI-RP2`` USB drive); there's no
-    remote reboot verb to do that automatically.
+    board isn't already in boot mode, a remote 1200-baud trigger is
+    tried first (no button press needed); only if no FaultyCat CDC is
+    detected do you get prompted to put it in boot mode manually (it
+    enumerates as a ``RPI-RP2`` USB drive).
     """
     from .fw_update import check_and_update_firmware
 

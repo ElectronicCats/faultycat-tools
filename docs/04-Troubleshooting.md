@@ -31,8 +31,6 @@ For active firmware development against a hand-built UF2 only, bypass with:
 faultycmd --ignore-version-mismatch <command> ...
 ```
 
-See [02-Configuration.md](02-Configuration.md#firmwarehost-version-parity).
-
 ## `faultycmd verify` fails
 
 Run `faultycmd verify` (not `-q`) to see which interface failed
@@ -131,9 +129,8 @@ close and reopen all CDCs rather than restarting the TUI.
   [WINDOWS_SUMP_DTR_ISSUE.md](WINDOWS_SUMP_DTR_ISSUE.md) for the two
   documented edge cases in this repo.
 - File an issue at
-  [github.com/ElectronicCats/faultycat/issues](https://github.com/ElectronicCats/faultycat/issues)
+  [github.com/ElectronicCats/faultycat-TUI/issues](https://github.com/ElectronicCats/faultycat-TUI/issues)
   with the `faultycmd devices` and `faultycmd verify` output attached.
-
-[TODO: confirm the public issue tracker URL — `pyproject.toml` points at
-`ElectronicCats/faultycat/issues`, but firmware-side issues may belong in
-a separate `faultycat-firmware` repo instead.]
+  Firmware-side bugs (not host-tool bugs) belong in
+  [`faultycat-firmware`](https://github.com/ElectronicCats/faultycat-firmware/issues)
+  instead.

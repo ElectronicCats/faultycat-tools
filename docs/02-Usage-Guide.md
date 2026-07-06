@@ -37,9 +37,11 @@ faultycmd update --force    # re-flash even if already matching
 
 Downloads the `.uf2` asset from the latest
 `ElectronicCats/faultycat-firmware` GitHub release and flashes it over the
-RP2040's UF2 bootloader. If the board isn't already in boot mode, you'll be
-prompted to put it there manually (it enumerates as an `RPI-RP2` USB
-drive) — there's no remote-reboot verb to do that automatically.
+RP2040's UF2 bootloader. If the board isn't already in boot mode, a remote
+1200-baud trigger is tried first (the same "magic baud" convention as
+`picotool reboot -f -u`) — no button press needed. Only if no FaultyCat CDC
+is detected do you get prompted to put the board in boot mode manually (it
+enumerates as an `RPI-RP2` USB drive).
 
 ## 3. EMFI (Electromagnetic Fault Injection)
 
@@ -162,12 +164,20 @@ faultycmd la pulseview --no-pulseview                          # arm only, open 
 ```
 
 `la capture` options of note: `--interval-us` (sample interval, default
-2µs), `--binary/--hex` (stream raw bytes instead of a hexdump — halves
+1µs), `--binary/--hex` (stream raw bytes instead of a hexdump — halves
 USB traffic at fast intervals), `--decode none|i2c|uart` (default
 `none`), `--sda`/`--scl` or `--rx`/`--baud` for the chosen decoder, and
 `--timeout-s`. Unlike `i2c probe`, `la capture` does **not**
 auto-discover SDA/SCL — pass them explicitly (they default to 0/1) or
 run `i2c scan` first if you don't already know the wiring.
+
+`--trigger/--no-trigger` blocks the capture window's start until the
+trigger channel goes low, backed up with pre-trigger history so a
+decoder has idle line to sync on. It defaults to on for `--decode uart`
+(the motivating case, via `--trigger-ch`/`--rx`) and off otherwise.
+`--trigger-ch` picks the channel explicitly (required for `--trigger`
+with `--decode none|i2c`), and `--trigger-timeout-s` bounds how long to
+wait for it (default: same as `--timeout-s`).
 
 `la pulseview` takes no pin arguments at all: it arms the firmware's raw
 SUMP/OLS capture of all 8 channels and hands off to PulseView, where you
@@ -195,8 +205,8 @@ diagnostic snapshot tail). Hotkeys:
 | `p` | open the camPaign control modal              |
 | `n` | open the scan-swd modal                      |
 
-Control modals prefill from the last successfully-applied parameters (see
-[02-Configuration.md](02-Configuration.md#persisted-state)).
+Control modals prefill from the last successfully-applied parameters,
+persisted locally between runs.
 
 >[!Note]
 > While the TUI is open it holds CDC0 (EMFI) and CDC1 (crowbar/campaign)

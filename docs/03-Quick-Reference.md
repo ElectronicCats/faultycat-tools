@@ -1,8 +1,9 @@
 # Quick Reference
 
 All commands accept the global `--ignore-version-mismatch` flag before the
-subcommand (see [02-Configuration.md](02-Configuration.md#firmwarehost-version-parity)).
-Every `--port` option overrides USB auto-discovery for that engine.
+subcommand (see ["Version mismatch"](04-Troubleshooting.md#version-mismatch-versionmismatcherror-exit-code-3)
+in the troubleshooting guide). Every `--port` option overrides USB
+auto-discovery for that engine.
 
 ## Top-Level Commands
 
@@ -81,13 +82,17 @@ auto-discover via `i2c scan`.
 
 | Command                                                              | Description                              |
 | ------------------------------------------------------------------------ | ------------------------------------------- |
-| `la capture [--interval-us N] [--samples N] [--binary/--hex] [--decode none\|i2c\|uart] [--sda N] [--scl N] [--rx N] [--baud N] [--vcd FILE] [--timeout-s N]` | Capture GP0..GP7, optionally decode on-device or export to VCD |
+| `la capture [--interval-us N] [--samples N] [--binary/--hex] [--decode none\|i2c\|uart] [--sda N] [--scl N] [--rx N] [--baud N] [--vcd FILE] [--timeout-s N] [--trigger/--no-trigger] [--trigger-ch N] [--trigger-timeout-s N]` | Capture GP0..GP7, optionally decode on-device or export to VCD |
 | `la pulseview [--pulseview/--no-pulseview]`                            | Arm SUMP/OLS mode for a live PulseView/sigrok capture |
 
 `la capture` does not auto-discover I2C pins — `--sda`/`--scl` default
 to 0/1; run `i2c scan` first if you don't know the wiring. `la
 pulseview` takes no pin arguments at all (it captures all 8 channels
 raw); pick SDA/SCL/etc. inside PulseView.
+
+`--trigger` defaults to on for `--decode uart` and off otherwise; it
+delays the capture window until `--trigger-ch` (or `--rx`) goes low,
+bounded by `--trigger-timeout-s` (default: same as `--timeout-s`).
 
 ## Exit Codes
 
