@@ -68,6 +68,7 @@ from ..protocols.i2c_decode import decode_i2c
 from ..protocols.uart_decode import decode_uart
 from ..protocols.la_decode import samples_to_vcd
 from .usb import PortDiscoveryError, discover
+from ..utils.triplet import parse_triplet
 from ..utils.version_check import VersionMismatchError, set_allow_mismatch
 from ..utils.output import (
     console,
@@ -130,13 +131,10 @@ def print_header(module: str | None = None) -> None:
 
 def _parse_axis(spec: str) -> tuple[int, int, int]:
     """Parse 'START:END:STEP' or just 'X' (collapses axis)."""
-    if ":" not in spec:
-        v = int(spec, 0)
-        return v, v, 0
-    parts = spec.split(":")
-    if len(parts) != 3:
-        raise click.BadParameter(f"axis must be START:END:STEP, got {spec!r}")
-    return int(parts[0], 0), int(parts[1], 0), int(parts[2], 0)
+    try:
+        return parse_triplet(spec)
+    except ValueError as e:
+        raise click.BadParameter(str(e)) from e
 
 
 def _engine_to_client(engine: str, port: str | None) -> CampaignClient:

@@ -27,6 +27,8 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Select, Static
 
+from ..utils.triplet import parse_triplet
+
 # -----------------------------------------------------------------
 # EMFI form state
 # -----------------------------------------------------------------
@@ -340,26 +342,6 @@ class EmfiControlModal(_StatusLineMixin, ModalScreen[None]):
 
 
 _CAMPAIGN_ENGINES = ("crowbar",)  # F11-0c MVP — emfi multiplex deferred
-
-
-def parse_triplet(s: str) -> tuple[int, int, int]:
-    """Accept ``"START:END:STEP"`` or a single ``"N"`` (collapses
-    axis). Returns ``(start, end, step)``; raises ValueError on a
-    malformed input or a non-monotonic / negative span."""
-    parts = s.strip().split(":")
-    if len(parts) == 1:
-        n = int(parts[0])
-        return (n, n, 0)
-    if len(parts) != 3:
-        raise ValueError(f"triplet must be 'START:END:STEP' or single 'N', got {s!r}")
-    start, end, step = (int(p) for p in parts)
-    if start > end:
-        raise ValueError(f"triplet start ({start}) must be <= end ({end})")
-    if start != end and step <= 0:
-        raise ValueError(
-            f"triplet step must be > 0 when start ({start}) != end ({end})"
-        )
-    return (start, end, step)
 
 
 @dataclass
