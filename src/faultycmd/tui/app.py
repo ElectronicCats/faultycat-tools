@@ -14,8 +14,9 @@ Each panel polls independently:
     EMFI:     emfi_proto STATUS over CDC0   every 500 ms
     Crowbar:  crowbar_proto STATUS over CDC1 every 500 ms
     Campaign: campaign_proto STATUS + DRAIN  every 500 ms
-              (shares CDC1 with Crowbar via a single serial.Serial
-               handed to both clients through serial_factory)
+              (runs on whichever CDC the selected engine owns —
+               crowbar → CDC1, emfi → CDC0 — sharing that CDC's
+               serial.Serial with the status client via serial_factory)
     Diag:     CDC2 diag snapshot tail        line-driven
 
 Hotkeys:
@@ -30,8 +31,8 @@ Hotkeys:
           (JTAG / direct-SWD verbs are WIP in this release)
 
 CDC ownership during a TUI session:
-    CDC0 is held by EMFI panel.
-    CDC1 is held by Crowbar + Campaign panels (shared Serial).
+    CDC0 is held by the EMFI panel + the emfi-engine Campaign (shared Serial).
+    CDC1 is held by the Crowbar panel + the crowbar-engine Campaign (shared Serial).
     CDC2 is held read-only by the Diag panel; when the Scanner modal
         dispatches a command, the diag tail is paused, the scanner
         shell client owns CDC2 for the call, and the diag tail is
@@ -196,14 +197,18 @@ class SharedSerial:
 class Connections:
     emfi: EmfiClient | None = None
     crowbar: CrowbarClient | None = None
-    campaign: CampaignClient | None = None
+    campaign: CampaignClient | None = None  # engine=crowbar, over CDC1
+    campaign_emfi: CampaignClient | None = None  # engine=emfi, over CDC0
+    cdc0_shared: SharedSerial | None = None
     cdc1_shared: SharedSerial | None = None
     cdc2_serial: object | None = None  # serial.Serial in diag tail
-    # CDC0 has a single owner (EmfiClient) but the daemon `_poll_emfi`
-    # and the EMFI modal callbacks both touch it — without a lock,
-    # a poll cycle in flight when the operator presses Apply/Arm/Fire
-    # races on the shared serial. CDC1 is already covered by
-    # `SharedSerial.lock`; this is the CDC0 analogue.
+    # CDC0 is shared between EmfiClient and the emfi-engine
+    # CampaignClient (same as crowbar+campaign share CDC1). The daemon
+    # `_poll_emfi`, the EMFI modal callbacks, and the emfi-campaign
+    # ops all touch CDC0 — `cdc0_lock` is the outer coordination lock
+    # they hold across their multi-call round-trips so none of them
+    # interleave on the shared serial. (SharedSerial's own per-op lock
+    # is the inner, defensive layer.)
     cdc0_lock: threading.Lock = field(default_factory=threading.Lock)
     last_error: str = ""
 
@@ -213,8 +218,23 @@ class Connections:
 
         self.last_error = ""
         try:
-            self.emfi = EmfiClient(cdc_for("emfi"))
+            # CDC0: shared between the EMFI status/control client and the
+            # emfi-engine campaign client — one serial.Serial, two clients
+            # via the base-class serial_factory hook (mirrors CDC1 below).
+            cdc0 = serial.Serial(cdc_for("emfi"), 115200, timeout=0.5)
+            self.cdc0_shared = SharedSerial(cdc0)
+
+            emfi_factory = lambda *_a, **_kw: self.cdc0_shared  # noqa: E731
+            self.emfi = EmfiClient("/dev/null", serial_factory=emfi_factory)
             self.emfi.open()
+
+            campaign_emfi_factory = lambda *_a, **_kw: self.cdc0_shared  # noqa: E731
+            self.campaign_emfi = CampaignClient(
+                "/dev/null",
+                engine="emfi",
+                serial_factory=campaign_emfi_factory,
+            )
+            self.campaign_emfi.open()
 
             cdc1 = serial.Serial(cdc_for("crowbar"), 115200, timeout=0.5)
             self.cdc1_shared = SharedSerial(cdc1)
@@ -240,9 +260,15 @@ class Connections:
             self.close()
 
     def close(self) -> None:
+        # emfi/campaign_emfi share cdc0; releasing the clients is a no-op
+        # on the SharedSerial wrapper, so close the underlying port after.
         if self.emfi:
             self.emfi.close()
         self.emfi = None
+        self.campaign_emfi = None
+        if self.cdc0_shared:
+            self.cdc0_shared.really_close()
+        self.cdc0_shared = None
         # crowbar/campaign share cdc1; release them then close the shared port.
         self.crowbar = None
         self.campaign = None
@@ -264,8 +290,11 @@ class Connections:
         read on Linux/macOS (the read returns b'' or raises OSError).
         """
         try:
-            if self.emfi and self.emfi._ser is not None:
-                self.emfi._ser.close()
+            if self.cdc0_shared:
+                # Bypass the lock — emfi + campaign_emfi share this fd;
+                # a worker stuck in read() only breaks when we close it
+                # from this thread (same rationale as cdc1_shared below).
+                self.cdc0_shared._ser.close()  # type: ignore[attr-defined]
         except OSError:
             pass
         try:
@@ -429,6 +458,10 @@ class FaultycmdTUI(App[None]):
         self._stop_workers = threading.Event()
         self._poll_threads: list[threading.Thread] = []
         self._last_config = LastConfig()
+        # Which engine the campaign panel + hotkeys drive. Set when the
+        # operator applies Configure in the Campaign modal (which pins
+        # the CDC the sweep runs on): "crowbar" → CDC1, "emfi" → CDC0.
+        self._campaign_engine = "crowbar"
         # Set during quit/unmount so background workers (in
         # particular the scanner task) skip re-opening CDC ports and
         # re-spawning poll threads — otherwise those daemon threads
@@ -546,6 +579,25 @@ class FaultycmdTUI(App[None]):
         for t in self._poll_threads:
             t.start()
 
+    def _poll_campaign_locked(self, client: CampaignClient) -> None:
+        """Poll a campaign client's STATUS (and DRAIN while it's
+        SWEEPING/DONE), posting summary + result lines to the panel.
+        The caller MUST already hold `client`'s CDC lock — this runs
+        inside the CDC0/CDC1 poll cycles so the shared serial isn't
+        touched by anyone else mid round-trip."""
+        camp_st = client.status()
+        self._post(self._update_campaign_summary, camp_st)
+        if camp_st.state in (CampaignState.SWEEPING, CampaignState.DONE):
+            results = client.drain(18)
+            if results:
+                rendered = [
+                    f"step={r.step_n} d={r.delay} w={r.width} "
+                    f"p={r.power} fire=0x{r.fire_status:02X} "
+                    f"verify=0x{r.verify_status:02X}"
+                    for r in results
+                ]
+                self._post(self._push_campaign_results, rendered)
+
     def _poll_emfi(self) -> None:
         while not self._stop_workers.is_set():
             if not self.conn.emfi:
@@ -555,10 +607,14 @@ class FaultycmdTUI(App[None]):
                 # Hold `cdc0_lock` so a concurrent modal action on the
                 # UI thread can't race with the status round-trip.
                 # Symmetric to `_poll_cdc1`'s use of `cdc1_shared.lock`.
+                # When the active campaign runs on emfi, its status +
+                # drain share this same CDC0 lock cycle.
                 with self.conn.cdc0_lock:
                     st = self.conn.emfi.status()
-                self._post(self._update_emfi, st)
-            except (ProtocolError, EngineError, OSError) as e:
+                    self._post(self._update_emfi, st)
+                    if self._campaign_engine == "emfi" and self.conn.campaign_emfi:
+                        self._poll_campaign_locked(self.conn.campaign_emfi)
+            except (ProtocolError, EngineError, CampaignError, OSError) as e:
                 self._post(self._note_error, f"emfi: {e}")
             self._stop_workers.wait(0.5)
 
@@ -575,18 +631,8 @@ class FaultycmdTUI(App[None]):
                 with self.conn.cdc1_shared.lock:
                     cst = self.conn.crowbar.status()
                     self._post(self._update_crowbar, cst)
-                    camp_st = self.conn.campaign.status()
-                    self._post(self._update_campaign_summary, camp_st)
-                    if camp_st.state in (CampaignState.SWEEPING, CampaignState.DONE):
-                        results = self.conn.campaign.drain(18)
-                        if results:
-                            rendered = [
-                                f"step={r.step_n} d={r.delay} w={r.width} "
-                                f"p={r.power} fire=0x{r.fire_status:02X} "
-                                f"verify=0x{r.verify_status:02X}"
-                                for r in results
-                            ]
-                            self._post(self._push_campaign_results, rendered)
+                    if self._campaign_engine == "crowbar":
+                        self._poll_campaign_locked(self.conn.campaign)
             except (ProtocolError, EngineError, CampaignError, OSError) as e:
                 self._post(self._note_error, f"cdc1: {e}")
             self._stop_workers.wait(0.5)
@@ -831,16 +877,32 @@ class FaultycmdTUI(App[None]):
         if self.campaign_panel is not None:
             self.campaign_panel.clear_tail()
 
+    def _campaign_target(
+        self, engine: str
+    ) -> tuple[CampaignClient | None, threading.Lock | threading.RLock | None]:
+        """Resolve the (client, CDC lock) pair for a campaign engine.
+        ``emfi`` runs over CDC0, ``crowbar`` over CDC1; returns
+        ``(None, None)`` when that engine's client isn't open."""
+        if engine == "emfi":
+            if self.conn.campaign_emfi and self.conn.cdc0_shared:
+                return self.conn.campaign_emfi, self.conn.cdc0_lock
+            return None, None
+        if self.conn.campaign and self.conn.cdc1_shared:
+            return self.conn.campaign, self.conn.cdc1_shared.lock
+        return None, None
+
     def action_stop_sweep(self) -> None:
         """F11-0c: replaces F10's `s = toggle demo` (locked 6-step
         crowbar LP). The demo concept is gone — `p` opens the real
         Campaign control modal. `s` here is an express-stop hotkey
         for aborting an in-flight sweep without opening the modal.
 
-        The stop round-trip is dispatched to a daemon thread so the
-        Textual event loop never blocks on `cdc1_shared.lock` /
-        firmware ack — same offload reason as the Campaign modal."""
-        if not (self.conn.campaign and self.conn.cdc1_shared):
+        Stops whichever engine's sweep is active (`_campaign_engine`,
+        pinned at Configure time). The stop round-trip is dispatched to
+        a daemon thread so the Textual event loop never blocks on the
+        CDC lock / firmware ack — same offload reason as the modal."""
+        client, lock = self._campaign_target(self._campaign_engine)
+        if client is None or lock is None:
             self.notify("no campaign client", severity="error")
             return
 
@@ -849,8 +911,8 @@ class FaultycmdTUI(App[None]):
 
         def worker() -> None:
             try:
-                with self.conn.cdc1_shared.lock:
-                    self.conn.campaign.stop()
+                with lock:
+                    client.stop()
             except (CampaignError, EngineError, ProtocolError, OSError) as e:
                 self._post(_notify, f"stop: {e}", "error")
             else:
@@ -1052,21 +1114,25 @@ class FaultycmdTUI(App[None]):
 
     def action_open_campaign_modal(self) -> None:
         """F11-0c: replaces F10's locked-6-step demo. Opens the
-        Campaign control modal with a sweep-params form. MVP only
-        supports engine=crowbar (CDC1); engine=emfi multiplex is
-        F-future (needs `Connections` refactor for CDC0 SharedSerial
-        + EmfiClient retrofit).
+        Campaign control modal with a sweep-params form. Both engines
+        are supported: ``crowbar`` runs the sweep over CDC1, ``emfi``
+        over CDC0 (the CDC is shared with the status client via
+        `SharedSerial`, same as the CLI's `campaign --engine`).
 
-        Each callback dispatches its CDC1 op to a daemon thread —
-        the lock + the round-trip both happen off the Textual event
-        loop, so the UI stays responsive even when the daemon
-        `_poll_cdc1` is mid-cycle. The result lands in the modal's
-        status line via `call_from_thread`. Without this offload,
-        pressing Stop right after Start could collide with the
-        poll's status+drain cycle (which holds `cdc1_shared.lock`
-        across 3 round-trips), and the UI would freeze waiting on
-        the lock + the firmware ack."""
-        if not (self.conn.campaign and self.conn.cdc1_shared):
+        The engine is pinned to `self._campaign_engine` when Configure
+        is applied — which is the required first step anyway (the
+        firmware rejects Start before Config with NOT_CONFIGURED) — so
+        Start/Stop/Drain and the live panel all follow it.
+
+        Each callback dispatches its CDC op to a daemon thread — the
+        lock + the round-trip both happen off the Textual event loop,
+        so the UI stays responsive even when the matching daemon poll
+        is mid-cycle. The result lands in the modal's status line via
+        `call_from_thread`. Without this offload, pressing Stop right
+        after Start could collide with the poll's status+drain cycle
+        (which holds the CDC lock across 3 round-trips), and the UI
+        would freeze waiting on the lock + the firmware ack."""
+        if not (self.conn.campaign or self.conn.campaign_emfi):
             self.notify("no campaign client", severity="error")
             return
         initial = CampaignFormState.from_dict(self._last_config.load("campaign"))
@@ -1078,9 +1144,9 @@ class FaultycmdTUI(App[None]):
         def _show(text: str) -> None:
             modal._set_status(text)
 
-        def _run(label: str, task) -> None:
+        def _run(label: str, lock, task) -> None:
             self._dispatch(
-                self.conn.cdc1_shared.lock,
+                lock,
                 (CampaignError, EngineError, ProtocolError, OSError),
                 label,
                 task,
@@ -1093,9 +1159,15 @@ class FaultycmdTUI(App[None]):
             except ValueError as e:
                 _show(f"configure: {e}")
                 return
+            client, lock = self._campaign_target(state.engine)
+            if client is None or lock is None:
+                _show(f"configure: no {state.engine} campaign client (CDC unavailable)")
+                return
+            # Pin the engine the panel + start/stop/drain now follow.
+            self._campaign_engine = state.engine
 
             def _task() -> None:
-                self.conn.campaign.configure(
+                client.configure(
                     delay=delay,
                     width=width,
                     power=power,
@@ -1103,26 +1175,37 @@ class FaultycmdTUI(App[None]):
                 )
                 self._last_config.save("campaign", state.to_dict())
 
-            _run("configure", _task)
+            _run("configure", lock, _task)
 
         def _on_start() -> None:
-            _run("start", self.conn.campaign.start)
+            client, lock = self._campaign_target(self._campaign_engine)
+            if client is None or lock is None:
+                _show("start: no campaign client")
+                return
+            _run("start", lock, client.start)
 
         def _on_stop() -> None:
-            _run("stop", self.conn.campaign.stop)
+            client, lock = self._campaign_target(self._campaign_engine)
+            if client is None or lock is None:
+                _show("stop: no campaign client")
+                return
+            _run("stop", lock, client.stop)
 
         def _on_drain() -> None:
-            """Drain remaining results manually. The daemon's
-            `_poll_cdc1` already auto-drains while state is
-            SWEEPING/DONE; this handles STOPPED/ERROR/IDLE states
-            where the daemon skips. The rendered lines are pushed
-            into the dashboard's CampaignPanel tail from the worker
-            thread via `call_from_thread`."""
+            """Drain remaining results manually. The active engine's
+            daemon poll already auto-drains while state is SWEEPING/DONE;
+            this handles STOPPED/ERROR/IDLE states where it skips. The
+            rendered lines are pushed into the dashboard's CampaignPanel
+            tail from the worker thread via `call_from_thread`."""
+            client, lock = self._campaign_target(self._campaign_engine)
+            if client is None or lock is None:
+                _show("drain: no campaign client")
+                return
 
             def worker() -> None:
                 try:
-                    with self.conn.cdc1_shared.lock:
-                        results = self.conn.campaign.drain(18)
+                    with lock:
+                        results = client.drain(18)
                 except (CampaignError, EngineError, ProtocolError, OSError) as e:
                     err = str(e)
                     self._post(_show, f"drain: {err}")
