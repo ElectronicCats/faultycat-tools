@@ -41,6 +41,7 @@ import random as _random
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 # External dependencies
@@ -63,7 +64,7 @@ from ..protocols import (
     parse_scan_i2c_match,
 )
 from ..protocols.crowbar import CrowbarOutput, CrowbarTrigger
-from ..protocols.emfi import EmfiTrigger
+from ..protocols.emfi import EmfiState, EmfiTrigger
 from ..protocols.i2c_decode import decode_i2c
 from ..protocols.uart_decode import decode_uart
 from ..protocols.la_decode import samples_to_vcd
@@ -358,17 +359,7 @@ def status(ctx: click.Context) -> None:
     """Show the current state of the EMFI module."""
     with _emfi_client(ctx) as cli:
         st = cli.status()
-    _print_status_table(
-        "EMFI status",
-        [
-            ("state", getattr(st.state, "name", str(st.state))),
-            ("err", getattr(st.err, "name", str(st.err))),
-            ("last_fire_at_ms", str(st.last_fire_at_ms)),
-            ("capture_fill", str(st.capture_fill)),
-            ("pulse_width_us_actual", str(st.pulse_width_us_actual)),
-            ("delay_us_actual", str(st.delay_us_actual)),
-        ],
-    )
+    _print_status_table("EMFI status", st.as_rows())
 
 
 @emfi.command()
@@ -411,12 +402,40 @@ def configure(
 
 
 @emfi.command()
+@click.option(
+    "--charge-timeout-s",
+    type=float,
+    default=10.0,
+    show_default=True,
+    help="Max time to wait for the HV cap to reach CHARGED before giving up.",
+)
 @click.pass_context
-def arm(ctx: click.Context) -> None:
-    """Arm the module (charge the high-voltage capacitor)."""
+def arm(ctx: click.Context, charge_timeout_s: float) -> None:
+    """Arm the module and wait for the high-voltage capacitor to charge.
+
+    ``arm`` only kicks off HV charging on the firmware — the state
+    machine reaches CHARGED asynchronously a moment later. Firing
+    before that returns a misleading ``INTERNAL`` error (really "HV
+    not charged yet"), so this polls ``status`` until the cap is
+    actually CHARGED before reporting success. That way a following
+    ``fire`` always finds the module ready.
+    """
     with _emfi_client(ctx) as cli:
         cli.arm()
-    print_success("Armed")
+        deadline = time.time() + charge_timeout_s
+        while time.time() < deadline:
+            st = cli.status()
+            if st.state == EmfiState.CHARGED:
+                print_success("Armed (HV charged)")
+                return
+            if st.state == EmfiState.ERROR:
+                err_name = getattr(st.err, "name", str(st.err))
+                raise click.ClickException(f"arm failed: err={err_name}")
+            time.sleep(0.05)
+    raise click.ClickException(
+        f"HV cap did not reach CHARGED within {charge_timeout_s:.1f}s "
+        "(try 'emfi status', or raise --charge-timeout-s)"
+    )
 
 
 @emfi.command()
@@ -517,17 +536,7 @@ def crowbar_status(ctx: click.Context) -> None:
     """Show the current state of the crowbar."""
     with _crowbar_client(ctx) as cli:
         st = cli.status()
-    _print_status_table(
-        "Crowbar status",
-        [
-            ("state", getattr(st.state, "name", str(st.state))),
-            ("err", getattr(st.err, "name", str(st.err))),
-            ("last_fire_at_ms", str(st.last_fire_at_ms)),
-            ("pulse_width_ns_actual", str(st.pulse_width_ns_actual)),
-            ("delay_us_actual", str(st.delay_us_actual)),
-            ("output", getattr(st.output, "name", str(st.output))),
-        ],
-    )
+    _print_status_table("Crowbar status", st.as_rows())
 
 
 @crowbar.command("configure")
@@ -643,16 +652,7 @@ def campaign_status(ctx: click.Context) -> None:
     """Show the state of the running sweep."""
     with _campaign_client(ctx) as cli:
         st = cli.status()
-    _print_status_table(
-        f"Campaign status ({ctx.obj[0]})",
-        [
-            ("state", getattr(st.state, "name", str(st.state))),
-            ("err", getattr(st.err, "name", str(st.err))),
-            ("step_n", f"{st.step_n}/{st.total_steps}"),
-            ("results_pushed", str(st.results_pushed)),
-            ("results_dropped", str(st.results_dropped)),
-        ],
-    )
+    _print_status_table(f"Campaign status ({ctx.obj[0]})", st.as_rows())
 
 
 @campaign.command("configure")

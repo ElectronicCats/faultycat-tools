@@ -341,7 +341,7 @@ class EmfiControlModal(_StatusLineMixin, ModalScreen[None]):
 # -----------------------------------------------------------------
 
 
-_CAMPAIGN_ENGINES = ("crowbar",)  # F11-0c MVP — emfi multiplex deferred
+_CAMPAIGN_ENGINES = ("crowbar", "emfi")  # crowbar → CDC1, emfi → CDC0
 
 
 @dataclass
@@ -380,10 +380,11 @@ class CampaignControlModal(_StatusLineMixin, ModalScreen[None]):
     """Campaign full-sweep configure / start / stop / drain.
 
     Replaces the F10 dashboard's `s` toggle-demo (locked to a
-    6-step crowbar LP sweep). F11-0c MVP keeps the engine fixed
-    to crowbar — emfi multiplex needs a `Connections` refactor
-    (CDC0 SharedSerial wrapper + retrofit `EmfiClient` to use
-    `serial_factory`) that's deferred to F-future."""
+    6-step crowbar LP sweep). Both engines are supported: ``crowbar``
+    runs the sweep over CDC1, ``emfi`` over CDC0 — mirroring the CLI's
+    ``campaign --engine`` (the firmware implies the engine from which
+    CDC the command arrives on). The dashboard shares each CDC between
+    its status client and the campaign client via ``SharedSerial``."""
 
     DEFAULT_CSS = """
     CampaignControlModal > Vertical {
@@ -424,10 +425,11 @@ class CampaignControlModal(_StatusLineMixin, ModalScreen[None]):
 
     @staticmethod
     def requires_hv_confirm(action: str) -> bool:
-        # Campaign drives the engine which may charge HV (when
-        # engine=emfi); F11-0c MVP only supports crowbar so no
-        # confirm is needed yet. When emfi multiplex lands, this
-        # should return True for `start` if engine == "emfi".
+        # An EMFI campaign arms + fires the HV cap on every step, but
+        # (like the CLI's `campaign --engine emfi start`) the sweep is
+        # a single deliberate operator action with no interactive gate;
+        # the firmware manages HV charge/discharge per step. The manual
+        # `e` EMFI modal still gates its one-shot arm via HvConfirmModal.
         return False
 
     def compose(self) -> ComposeResult:
@@ -441,7 +443,8 @@ class CampaignControlModal(_StatusLineMixin, ModalScreen[None]):
                 id="engine",
             )
             yield Label(
-                "[dim](emfi multiplex: F-future — needs Connections refactor)[/dim]"
+                "[dim](crowbar → CDC1 · emfi → CDC0 · pick engine, then Configure)"
+                "[/dim]"
             )
             yield Label("delay (µs)  START:END:STEP or single int:")
             yield Input(value=self.state.delay, id="delay")

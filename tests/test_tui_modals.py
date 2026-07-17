@@ -373,8 +373,9 @@ def test_campaign_form_state_parse_emits_triplets():
 
 
 def test_campaign_form_state_validates_engine():
-    with pytest.raises(ValueError):
-        CampaignFormState(engine="emfi").validate()  # F-future MVP gate
+    # Both engines are now supported (crowbar → CDC1, emfi → CDC0).
+    CampaignFormState(engine="crowbar").validate()
+    CampaignFormState(engine="emfi").validate()
     with pytest.raises(ValueError):
         CampaignFormState(engine="bogus").validate()
 
@@ -410,9 +411,11 @@ def test_campaign_modal_construction_prefills():
     assert m.state.settle_ms == 25
 
 
-def test_campaign_modal_no_action_requires_hv_confirm_in_mvp():
-    """F11-0c MVP only supports engine=crowbar (no HV cap). When
-    emfi multiplex lands, `start` should require HV confirm."""
+def test_campaign_modal_no_action_requires_hv_confirm():
+    """A campaign sweep (either engine) is a single deliberate
+    operator action with no interactive HV gate — same as the CLI's
+    `campaign --engine emfi start`; the firmware manages HV per step.
+    The one-shot `e` EMFI modal keeps its own HvConfirmModal gate."""
     m = CampaignControlModal(initial=CampaignFormState())
     for action in ("configure", "start", "stop", "drain"):
         assert m.requires_hv_confirm(action) is False
