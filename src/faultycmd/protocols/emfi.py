@@ -81,6 +81,18 @@ class EmfiStatus:
     pulse_width_us_actual: int
     delay_us_actual: int
 
+    def as_rows(self) -> list[tuple[str, str]]:
+        """Canonical (field, value) rows for display. Single source of
+        truth shared by the CLI status table and the TUI EMFI panel."""
+        return [
+            ("state", getattr(self.state, "name", str(self.state))),
+            ("err", getattr(self.err, "name", str(self.err))),
+            ("last_fire_at_ms", str(self.last_fire_at_ms)),
+            ("capture_fill", str(self.capture_fill)),
+            ("pulse_width_us_actual", str(self.pulse_width_us_actual)),
+            ("delay_us_actual", str(self.delay_us_actual)),
+        ]
+
 
 class EmfiClient(BinaryProtoClient):
     """F4 emfi_proto over CDC0."""

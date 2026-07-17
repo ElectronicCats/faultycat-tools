@@ -90,6 +90,18 @@ class CrowbarStatus:
     delay_us_actual: int
     output: CrowbarOutput
 
+    def as_rows(self) -> list[tuple[str, str]]:
+        """Canonical (field, value) rows for display. Single source of
+        truth shared by the CLI status table and the TUI crowbar panel."""
+        return [
+            ("state", getattr(self.state, "name", str(self.state))),
+            ("err", getattr(self.err, "name", str(self.err))),
+            ("last_fire_at_ms", str(self.last_fire_at_ms)),
+            ("pulse_width_ns_actual", str(self.pulse_width_ns_actual)),
+            ("delay_us_actual", str(self.delay_us_actual)),
+            ("output", getattr(self.output, "name", str(self.output))),
+        ]
+
 
 class CrowbarClient(BinaryProtoClient):
     """F5 crowbar_proto over CDC1."""

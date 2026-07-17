@@ -590,12 +590,7 @@ class FaultycmdTUI(App[None]):
         if camp_st.state in (CampaignState.SWEEPING, CampaignState.DONE):
             results = client.drain(18)
             if results:
-                rendered = [
-                    f"step={r.step_n} d={r.delay} w={r.width} "
-                    f"p={r.power} fire=0x{r.fire_status:02X} "
-                    f"verify=0x{r.verify_status:02X}"
-                    for r in results
-                ]
+                rendered = [r.render_line() for r in results]
                 self._post(self._push_campaign_results, rendered)
 
     def _poll_emfi(self) -> None:
@@ -670,43 +665,20 @@ class FaultycmdTUI(App[None]):
     def _update_emfi(self, st) -> None:
         if self.emfi_panel is None:
             return
-        self.emfi_panel.update_fields(
-            {
-                "state": getattr(st.state, "name", str(st.state)),
-                "err": getattr(st.err, "name", str(st.err)),
-                "last_fire_ms": str(st.last_fire_at_ms),
-                "capture_fill": str(st.capture_fill),
-                "width_us": str(st.pulse_width_us_actual),
-                "delay_us": str(st.delay_us_actual),
-            }
-        )
+        # Field selection + value stringification live on EmfiStatus.as_rows
+        # (shared with the CLI status table) so a new status field only
+        # has to be added in one place.
+        self.emfi_panel.update_fields(dict(st.as_rows()))
 
     def _update_crowbar(self, st) -> None:
         if self.crowbar_panel is None:
             return
-        self.crowbar_panel.update_fields(
-            {
-                "state": getattr(st.state, "name", str(st.state)),
-                "err": getattr(st.err, "name", str(st.err)),
-                "last_fire_ms": str(st.last_fire_at_ms),
-                "width_ns": str(st.pulse_width_ns_actual),
-                "delay_us": str(st.delay_us_actual),
-                "output": getattr(st.output, "name", str(st.output)),
-            }
-        )
+        self.crowbar_panel.update_fields(dict(st.as_rows()))
 
     def _update_campaign_summary(self, st) -> None:
         if self.campaign_panel is None:
             return
-        self.campaign_panel.set_summary(
-            {
-                "state": getattr(st.state, "name", str(st.state)),
-                "err": getattr(st.err, "name", str(st.err)),
-                "step": f"{st.step_n}/{st.total_steps}",
-                "pushed": str(st.results_pushed),
-                "dropped": str(st.results_dropped),
-            }
-        )
+        self.campaign_panel.set_summary(dict(st.as_rows()))
 
     def _push_campaign_results(self, rendered: list[str]) -> None:
         if self.campaign_panel is None:
@@ -1211,12 +1183,7 @@ class FaultycmdTUI(App[None]):
                     self._post(_show, f"drain: {err}")
                     return
                 if results and self.campaign_panel is not None:
-                    rendered = [
-                        f"step={r.step_n} d={r.delay} w={r.width} "
-                        f"p={r.power} fire=0x{r.fire_status:02X} "
-                        f"verify=0x{r.verify_status:02X}"
-                        for r in results
-                    ]
+                    rendered = [r.render_line() for r in results]
                     self._post(self.campaign_panel.push_results, rendered)
                 self._post(_show, f"OK drain ({len(results)} results)")
 

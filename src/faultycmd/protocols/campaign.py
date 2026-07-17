@@ -91,6 +91,18 @@ class CampaignStatus:
     results_pushed: int
     results_dropped: int
 
+    def as_rows(self) -> list[tuple[str, str]]:
+        """Canonical (field, value) rows for display. Single source of
+        truth shared by the CLI status table and the TUI campaign panel
+        so a new status field only has to be added here."""
+        return [
+            ("state", getattr(self.state, "name", str(self.state))),
+            ("err", getattr(self.err, "name", str(self.err))),
+            ("step_n", f"{self.step_n}/{self.total_steps}"),
+            ("results_pushed", str(self.results_pushed)),
+            ("results_dropped", str(self.results_dropped)),
+        ]
+
 
 @dataclass
 class CampaignResult:
@@ -102,6 +114,15 @@ class CampaignResult:
     verify_status: int
     target_state: int
     ts_us: int
+
+    def render_line(self) -> str:
+        """One-line summary of a sweep result, shared by the TUI's live
+        poll and manual-drain paths (and available to any CLI caller)."""
+        return (
+            f"step={self.step_n} d={self.delay} w={self.width} "
+            f"p={self.power} fire=0x{self.fire_status:02X} "
+            f"verify=0x{self.verify_status:02X}"
+        )
 
 
 class CampaignError(Exception):
