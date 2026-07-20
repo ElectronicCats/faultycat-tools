@@ -144,6 +144,36 @@ def _engine_to_client(engine: str, port: str | None) -> CampaignClient:
     return CampaignClient.discover(engine)  # type: ignore[arg-type]
 
 
+def _apply_campaign_trigger(
+    engine: str,
+    port: str | None,
+    trigger: str,
+    delay: tuple[int, int, int],
+    width: tuple[int, int, int],
+    power: tuple[int, int, int],
+) -> None:
+    """Pin the per-shot trigger on the engine module before a sweep.
+
+    ``campaign_proto`` CONFIG carries no trigger field — the firmware
+    inherits the per-shot trigger from the engine module's own configure
+    — so we set it here once, right before configuring the sweep. The
+    delay/width/output handed to the module are overwritten per step by
+    the sweep; we pass the axis-start values only to keep this configure
+    valid (e.g. EMFI width must land in the 1..50 µs driver bound).
+    """
+    if engine == "emfi":
+        trig = EmfiTrigger[trigger.upper()]
+        client = EmfiClient(port) if port is not None else EmfiClient.discover()
+        with client as cli:
+            cli.configure(trig, delay[0], width[0], 0)
+    else:
+        c_trig = CrowbarTrigger[trigger.upper()]
+        out = CrowbarOutput.HP if power[0] == 2 else CrowbarOutput.LP
+        c_client = CrowbarClient(port) if port is not None else CrowbarClient.discover()
+        with c_client as cli:
+            cli.configure(c_trig, out, delay[0], width[0])
+
+
 def _print_status_table(title: str, rows: list[tuple[str, str]]) -> None:
     table = Table(title=title, show_header=False, box=None, pad_edge=False)
     table.add_column("field", style="cyan", no_wrap=True)
@@ -670,6 +700,14 @@ def campaign_status(ctx: click.Context) -> None:
     help="Power range. On crowbar: 1=low, 2=high. Ignored on EMFI.",
 )
 @click.option(
+    "--trigger",
+    type=click.Choice([t.name.lower() for t in EmfiTrigger]),
+    default="immediate",
+    show_default=True,
+    help="Per-shot trigger source for the whole sweep. Applied to the "
+    "engine module before the sweep runs (the campaign inherits it).",
+)
+@click.option(
     "--settle-ms",
     type=int,
     default=0,
@@ -682,17 +720,18 @@ def campaign_configure(
     delay: str,
     width: str,
     power: str,
+    trigger: str,
     settle_ms: int,
 ) -> None:
     """Define the sweep ranges."""
+    engine, port = ctx.obj
+    delay_t = _parse_axis(delay)
+    width_t = _parse_axis(width)
+    power_t = _parse_axis(power)
+    _apply_campaign_trigger(engine, port, trigger, delay_t, width_t, power_t)
     with _campaign_client(ctx) as cli:
-        cli.configure(
-            _parse_axis(delay),
-            _parse_axis(width),
-            _parse_axis(power),
-            settle_ms=settle_ms,
-        )
-    print_success("Configured")
+        cli.configure(delay_t, width_t, power_t, settle_ms=settle_ms)
+    print_success(f"Configured (trigger={trigger})")
 
 
 @campaign.command("start")
