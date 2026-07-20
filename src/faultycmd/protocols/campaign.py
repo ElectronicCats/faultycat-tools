@@ -74,6 +74,29 @@ class CampaignErr(IntEnum):
     INTERNAL = 5
 
 
+_ERR_HINTS: dict[CampaignErr, str] = {
+    CampaignErr.BAD_CONFIG: (
+        "sweep config rejected — check each axis is start<=end with step>0 "
+        "(step 0 collapses to start) and that total steps > 0"
+    ),
+    CampaignErr.NOT_CONFIGURED: (
+        "run Configure before Start — the firmware rejects Start until a "
+        "valid sweep config has been applied"
+    ),
+    CampaignErr.BUS_BUSY: (
+        "the engine bus was busy — another op held the CDC mid-step; "
+        "Stop, wait a moment, then retry"
+    ),
+    CampaignErr.STEP_FAILED: (
+        "a sweep step failed — the engine's fire/verify errored; the "
+        "decoded fire=/verify= codes on the failing result line below say why"
+    ),
+    CampaignErr.INTERNAL: (
+        "internal firmware fault — Stop the sweep, then reconfigure and retry"
+    ),
+}
+
+
 class ProtoStatus(IntEnum):
     """1-byte status replies from CONFIG / START / STOP."""
 
@@ -102,6 +125,15 @@ class CampaignStatus:
             ("results_pushed", str(self.results_pushed)),
             ("results_dropped", str(self.results_dropped)),
         ]
+
+    def err_hint(self) -> str:
+        """Human-readable, actionable explanation for the current error
+        code, or ``""`` when there's no error. Mirrors the engine-level
+        ``_ERR_HINTS`` maps (emfi/crowbar) so an opaque ``STEP_FAILED``
+        turns into a line the operator can act on."""
+        if self.err == CampaignErr.NONE:
+            return ""
+        return _ERR_HINTS.get(self.err, "")  # type: ignore[arg-type]
 
 
 @dataclass

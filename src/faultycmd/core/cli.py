@@ -683,6 +683,9 @@ def campaign_status(ctx: click.Context) -> None:
     with _campaign_client(ctx) as cli:
         st = cli.status()
     _print_status_table(f"Campaign status ({ctx.obj[0]})", st.as_rows())
+    hint = st.err_hint()
+    if hint:
+        print_warning(hint)
 
 
 @campaign.command("configure")
@@ -842,10 +845,16 @@ def campaign_watch(ctx: click.Context, every_ms: int) -> None:
             live.update(_render())
     if last_status is not None:
         st = last_status
-        print_success(
+        summary = (
             f"done state={getattr(st.state, 'name', st.state)} "
             f"step={st.step_n}/{st.total_steps} pushed={st.results_pushed} dropped={st.results_dropped}"
         )
+        hint = st.err_hint()
+        if hint:
+            print_error(summary)
+            print_warning(hint)
+        else:
+            print_success(summary)
 
 
 # -----------------------------------------------------------------------------
