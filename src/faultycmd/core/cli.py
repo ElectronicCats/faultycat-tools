@@ -63,6 +63,7 @@ from ..protocols import (
     ScannerError,
     parse_scan_i2c_match,
 )
+from ..protocols.campaign import decode_fire_status
 from ..protocols.crowbar import CrowbarOutput, CrowbarTrigger
 from ..protocols.emfi import EmfiState, EmfiTrigger
 from ..protocols.i2c_decode import decode_i2c
@@ -755,6 +756,14 @@ def campaign_stop(ctx: click.Context) -> None:
     print_success("Stopped")
 
 
+def _fmt_fire_status(engine: str, code: int) -> str:
+    """Table cell for a step's fire/verify byte: the decoded cause when the
+    byte is a known executor-phase or engine-error code (e.g.
+    ``CHARGE_TIMEOUT``, ``emfi:HV_NOT_CHARGED``), else raw hex."""
+    nm = decode_fire_status(engine, code)
+    return nm if nm else f"0x{code:02X}"
+
+
 @campaign.command("drain")
 @click.option(
     "--max",
@@ -767,6 +776,7 @@ def campaign_stop(ctx: click.Context) -> None:
 @click.pass_context
 def campaign_drain(ctx: click.Context, max_count: int) -> None:
     """Download the accumulated sweep results."""
+    engine = ctx.obj[0]
     rows: list[tuple] = []
     with _campaign_client(ctx) as cli:
         for r in cli.drain_all():
@@ -776,8 +786,8 @@ def campaign_drain(ctx: click.Context, max_count: int) -> None:
                     r.delay,
                     r.width,
                     r.power,
-                    f"0x{r.fire_status:02X}",
-                    f"0x{r.verify_status:02X}",
+                    _fmt_fire_status(engine, r.fire_status),
+                    _fmt_fire_status(engine, r.verify_status),
                     f"0x{r.target_state:08X}",
                     r.ts_us,
                 )
@@ -828,8 +838,8 @@ def campaign_watch(ctx: click.Context, every_ms: int) -> None:
                 str(r.delay),
                 str(r.width),
                 str(r.power),
-                f"0x{r.fire_status:02X}",
-                f"0x{r.verify_status:02X}",
+                _fmt_fire_status(engine, r.fire_status),
+                _fmt_fire_status(engine, r.verify_status),
                 f"0x{r.target_state:08X}",
             )
         return t
