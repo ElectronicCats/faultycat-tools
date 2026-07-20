@@ -1137,8 +1137,31 @@ class FaultycmdTUI(App[None]):
                 return
             # Pin the engine the panel + start/stop/drain now follow.
             self._campaign_engine = state.engine
+            trig_name = state.trigger.upper()
 
             def _task() -> None:
+                # The campaign_proto CONFIG has no trigger field — the
+                # firmware inherits the per-shot trigger from the engine
+                # module's own configure. Pin it here, right before the
+                # sweep config, so the operator no longer has to set it
+                # via the separate EMFI/Crowbar modal first. The
+                # delay/width/output passed here are overwritten per
+                # step by the sweep; we hand the axis-start values just
+                # to keep this module configure valid.
+                if state.engine == "emfi" and self.conn.emfi:
+                    self.conn.emfi.configure(
+                        trigger=EmfiTrigger[trig_name],
+                        delay_us=delay[0],
+                        width_us=width[0],
+                        charge_timeout_ms=0,
+                    )
+                elif state.engine == "crowbar" and self.conn.crowbar:
+                    self.conn.crowbar.configure(
+                        trigger=CrowbarTrigger[trig_name],
+                        output=CrowbarOutput.HP if power[0] == 2 else CrowbarOutput.LP,
+                        delay_us=delay[0],
+                        width_ns=width[0],
+                    )
                 client.configure(
                     delay=delay,
                     width=width,

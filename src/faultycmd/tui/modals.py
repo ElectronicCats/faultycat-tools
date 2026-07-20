@@ -342,11 +342,18 @@ class EmfiControlModal(_StatusLineMixin, ModalScreen[None]):
 
 
 _CAMPAIGN_ENGINES = ("crowbar", "emfi")  # crowbar → CDC1, emfi → CDC0
+# Both engines share the same trigger enum (EmfiTrigger / CrowbarTrigger
+# have identical members). The campaign_proto CONFIG carries no trigger
+# field — the firmware inherits the per-shot trigger from the engine
+# module's own configure — so the dashboard pins it on the module right
+# before starting the sweep (see app.action_open_campaign_modal).
+_CAMPAIGN_TRIGGERS = _EMFI_TRIGGERS
 
 
 @dataclass
 class CampaignFormState(_DictFormMixin):
     engine: str = "crowbar"
+    trigger: str = "immediate"  # per-shot trigger, applied to the module
     delay: str = "1000:3000:1000"  # µs (text triplet, parsed on validate)
     width: str = "200:300:100"  # ns for crowbar, µs for emfi
     power: str = "1:1:0"  # crowbar 1=LP / 2=HP
@@ -369,11 +376,34 @@ class CampaignFormState(_DictFormMixin):
             raise ValueError(
                 f"engine must be one of {_CAMPAIGN_ENGINES}, got {self.engine!r}"
             )
+        if self.trigger not in _CAMPAIGN_TRIGGERS:
+            raise ValueError(
+                f"trigger must be one of {_CAMPAIGN_TRIGGERS}, got {self.trigger!r}"
+            )
         if not 0 <= self.settle_ms <= 60000:
             raise ValueError(f"settle_ms out of range 0..60000, got {self.settle_ms}")
         # Trip every axis through parse to surface a malformed
         # triplet at validate time (not deep inside configure).
-        self.parse()
+        _delay, width, _power, _settle = self.parse()
+        # Range-check the width axis against the selected engine's driver
+        # bounds — the SAME limits the manual EMFI/Crowbar modals enforce
+        # (EmfiFormState: 1..50 µs, CrowbarFormState: 8..50000 ns).
+        # Without this a crowbar-style width (e.g. the default
+        # 200:300:100, ns) run as an EMFI sweep is read as 200..300 µs:
+        # the firmware rejects every step's per-shot configure with
+        # BAD_CONFIG, the HV cap never charges, and the sweep silently
+        # "never arms" — indistinguishable, from the panel, from a dead
+        # start. Surfacing it here turns that into an inline form error.
+        if self.engine == "emfi":
+            lo, hi, unit = 1, 50, "µs"
+        else:
+            lo, hi, unit = 8, 50000, "ns"
+        for edge, val in (("start", width[0]), ("end", width[1])):
+            if not lo <= val <= hi:
+                raise ValueError(
+                    f"{self.engine} width {edge} out of range {lo}..{hi} {unit} "
+                    f"(driver-bounded): {val}"
+                )
 
 
 class CampaignControlModal(_StatusLineMixin, ModalScreen[None]):
@@ -446,6 +476,12 @@ class CampaignControlModal(_StatusLineMixin, ModalScreen[None]):
                 "[dim](crowbar → CDC1 · emfi → CDC0 · pick engine, then Configure)"
                 "[/dim]"
             )
+            yield Label("trigger (applied to the engine before the sweep):")
+            yield Select(
+                [(t, t) for t in _CAMPAIGN_TRIGGERS],
+                value=self.state.trigger,
+                id="trigger",
+            )
             yield Label("delay (µs)  START:END:STEP or single int:")
             yield Input(value=self.state.delay, id="delay")
             yield Label("width (ns crowbar / µs emfi)  START:END:STEP:")
@@ -465,6 +501,7 @@ class CampaignControlModal(_StatusLineMixin, ModalScreen[None]):
     def _sync_state_from_inputs(self) -> bool:
         try:
             engine = self.query_one("#engine", Select).value
+            trigger = self.query_one("#trigger", Select).value
             delay = self.query_one("#delay", Input).value or ""
             width = self.query_one("#width", Input).value or ""
             power = self.query_one("#power", Input).value or ""
@@ -474,6 +511,7 @@ class CampaignControlModal(_StatusLineMixin, ModalScreen[None]):
             return False
         candidate = CampaignFormState(
             engine=engine if isinstance(engine, str) else "crowbar",
+            trigger=trigger if isinstance(trigger, str) else "immediate",
             delay=delay,
             width=width,
             power=power,
