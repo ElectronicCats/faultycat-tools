@@ -37,6 +37,8 @@ from typing import Literal
 
 from ..core.usb import cdc_for
 from ._base import BinaryProtoClient
+from .crowbar import CrowbarErr
+from .emfi import EmfiErr
 
 CMD_CONFIG = 0x20
 CMD_START = 0x21
@@ -134,6 +136,62 @@ class CampaignStatus:
         if self.err == CampaignErr.NONE:
             return ""
         return _ERR_HINTS.get(self.err, "")  # type: ignore[arg-type]
+
+
+class CampaignFireStatus(IntEnum):
+    """``campaign_fire_status_t`` — the executor's OWN codes for a step's
+    ``fire_status`` byte, mirroring ``services/campaign_manager/
+    campaign_manager.h``.
+
+    These are distinct from the per-engine ``*_err_t`` values: a step's
+    ``fire_status`` uses three disjoint namespaces so the byte decodes
+    unambiguously (see :func:`decode_fire_status`):
+
+    * ``0x00``       — step fired cleanly (``OK``)
+    * ``0x80..0xBF`` — the engine entered its ERROR state; the real
+      ``*_err_t`` is in the low 7 bits (``ENGINE_ERR_FLAG`` marks it)
+    * ``0xE0..0xEF`` — an executor-phase failure (this enum)
+    """
+
+    OK = 0x00
+    CONFIGURE_ERR = 0xE1
+    ARM_ERR = 0xE2
+    CHARGE_TIMEOUT = 0xE3
+    FIRE_REJECTED = 0xE4
+    ENGINE_STUCK = 0xE5
+
+
+# Marker bit OR'd with a real ``*_err_t`` when the engine enters ERROR.
+CAMPAIGN_FIRE_ENGINE_ERR_FLAG = 0x80
+
+_ENGINE_ERR: dict[str, type[IntEnum]] = {"emfi": EmfiErr, "crowbar": CrowbarErr}
+
+
+def decode_fire_status(engine: str, code: int) -> str:
+    """Human-readable name for a step's ``fire_status``/``verify_status``
+    byte, decoded against the right namespace by range. Returns ``""`` for
+    a clean (``0x00``) or undecodable code so callers can fall back to raw
+    hex.
+
+    * ``0x80..0xBF`` → engine ERROR: ``engine:<ERR_NAME>`` (e.g.
+      ``emfi:HV_NOT_CHARGED``)
+    * ``0xE0..0xEF`` → executor phase: the :class:`CampaignFireStatus` name
+    * anything else  → ``""``
+    """
+    if code == 0:
+        return ""
+    if CAMPAIGN_FIRE_ENGINE_ERR_FLAG <= code <= 0xBF:
+        enum = _ENGINE_ERR.get(engine)
+        if enum is not None:
+            try:
+                return f"{engine}:{enum(code & 0x7F).name}"
+            except ValueError:
+                return ""
+        return ""
+    try:
+        return CampaignFireStatus(code).name
+    except ValueError:
+        return ""
 
 
 @dataclass
@@ -333,6 +391,8 @@ __all__ = [
     "Engine",
     "CampaignState",
     "CampaignErr",
+    "CampaignFireStatus",
+    "decode_fire_status",
     "ProtoStatus",
     "CampaignStatus",
     "CampaignResult",

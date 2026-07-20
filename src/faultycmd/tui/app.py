@@ -68,9 +68,9 @@ from ..protocols import (
     ProtocolError,
     ScannerClient,
 )
-from ..protocols.campaign import CampaignState
-from ..protocols.crowbar import CrowbarErr, CrowbarOutput, CrowbarTrigger
-from ..protocols.emfi import EmfiErr, EmfiTrigger
+from ..protocols.campaign import CampaignState, decode_fire_status
+from ..protocols.crowbar import CrowbarOutput, CrowbarTrigger
+from ..protocols.emfi import EmfiTrigger
 from .modals import (
     CampaignControlModal,
     CampaignFormState,
@@ -132,39 +132,28 @@ class DiagSnapshot:
 
 
 # -----------------------------------------------------------------------------
-# Result-line decoding — a campaign result's fire_status / verify_status
-# bytes ARE the active engine's `*_err_t` code (that's what turns a generic
-# STEP_FAILED into a concrete cause, e.g. emfi 0x03 == TRIGGER_TIMEOUT). The
-# byte's meaning depends on the engine, so decode against the matching enum.
+# Result-line decoding — a step's fire_status / verify_status byte is NOT a
+# bare `*_err_t`. It uses three disjoint namespaces (see decode_fire_status):
+# 0x00 clean, 0xE0..0xEF executor-phase failures (configure/arm/charge/fire),
+# and 0x80|err when the engine itself entered ERROR. Reinterpreting every byte
+# as `*_err_t` is exactly the bug that made a charge race show as
+# "TRIGGER_TIMEOUT" (EmfiErr(3)) — so decode by range via decode_fire_status.
 # -----------------------------------------------------------------------------
-
-_ENGINE_ERR = {"emfi": EmfiErr, "crowbar": CrowbarErr}
-
-
-def _engine_err_name(engine: str, code: int) -> str:
-    """Name of the engine `*_err_t` value for ``code``, or ``""`` if the
-    engine is unknown or the code isn't a defined error."""
-    enum = _ENGINE_ERR.get(engine)
-    if enum is None:
-        return ""
-    try:
-        return enum(code).name
-    except ValueError:
-        return ""
 
 
 def _decorate_result(engine: str, r) -> str:
     """Render a campaign result line, appending a decoded, highlighted
     suffix whenever a step's fire/verify status is non-zero so the
-    operator sees *why* a step failed (e.g. ``fire=TRIGGER_TIMEOUT``)
-    instead of a bare ``fire=0x03``. Clean steps render unchanged."""
+    operator sees *why* a step failed (e.g. ``fire=CHARGE_TIMEOUT`` or
+    ``fire=emfi:HV_NOT_CHARGED``) instead of a bare ``fire=0x03``. Clean
+    steps render unchanged."""
     line = r.render_line()
     tags: list[str] = []
     if r.fire_status:
-        nm = _engine_err_name(engine, r.fire_status)
+        nm = decode_fire_status(engine, r.fire_status)
         tags.append(f"fire={nm}" if nm else f"fire=0x{r.fire_status:02X}")
     if r.verify_status:
-        nm = _engine_err_name(engine, r.verify_status)
+        nm = decode_fire_status(engine, r.verify_status)
         tags.append(f"verify={nm}" if nm else f"verify=0x{r.verify_status:02X}")
     if tags:
         line += "  [bold red](" + ", ".join(tags) + ")[/bold red]"
