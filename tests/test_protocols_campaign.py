@@ -18,8 +18,10 @@ from faultycmd.protocols.campaign import (
     STATUS_REPLY_LEN,
     CampaignErr,
     CampaignError,
+    CampaignFireStatus,
     CampaignState,
     ProtoStatus,
+    decode_fire_status,
 )
 from tests.conftest import FakeSerial, make_fake_factory
 
@@ -216,3 +218,43 @@ def test_constants_match_mutex_internals_spec():
     assert STATUS_REPLY_LEN == 20
     assert RECORD_LEN == 28
     assert DRAIN_MAX_COUNT == 18
+
+
+# -- fire_status decoding (BUG_EMFI_CAMPAIGN_ARM_RACE) --------------
+
+
+def test_decode_fire_status_clean_is_empty():
+    assert decode_fire_status("emfi", 0x00) == ""
+
+
+def test_decode_fire_status_executor_phase():
+    assert (
+        decode_fire_status("emfi", CampaignFireStatus.CHARGE_TIMEOUT)
+        == "CHARGE_TIMEOUT"
+    )
+    assert (
+        decode_fire_status("emfi", CampaignFireStatus.FIRE_REJECTED) == "FIRE_REJECTED"
+    )
+    assert (
+        decode_fire_status("crowbar", CampaignFireStatus.CONFIGURE_ERR)
+        == "CONFIGURE_ERR"
+    )
+
+
+def test_decode_fire_status_engine_error_uses_low_bits():
+    # 0x80 | emfi_err_t(2 == HV_NOT_CHARGED)
+    assert decode_fire_status("emfi", 0x82) == "emfi:HV_NOT_CHARGED"
+    # 0x80 | crowbar_err_t(2 == TRIGGER_TIMEOUT)
+    assert decode_fire_status("crowbar", 0x82) == "crowbar:TRIGGER_TIMEOUT"
+
+
+def test_decode_fire_status_no_longer_misreads_bare_errt():
+    # The regression at the heart of the arm/charge race: a low byte like
+    # 0x03 must NOT decode as EmfiErr(3)==TRIGGER_TIMEOUT anymore — the
+    # executor no longer emits bare *_err_t values, so it falls back to hex.
+    assert decode_fire_status("emfi", 0x03) == ""
+
+
+def test_decode_fire_status_unknown_engine_or_code():
+    assert decode_fire_status("nope", 0x82) == ""
+    assert decode_fire_status("emfi", 0xFF) == ""
