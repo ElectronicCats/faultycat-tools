@@ -4,7 +4,7 @@
 [Setup]
 AppId={{8C4E6F2A-9B1D-4A3E-8F2C-5D6E7F8A9B1C}
 AppName=FaultyCat
-AppVersion=1.0.1
+AppVersion=1.0.2
 AppPublisher=Electronic Cats
 AppPublisherURL=https://github.com/ElectronicCats/faultycat
 AppSupportURL=https://github.com/ElectronicCats/faultycat/issues
