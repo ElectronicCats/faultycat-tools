@@ -342,6 +342,17 @@ class EmfiControlModal(_StatusLineMixin, ModalScreen[None]):
 
 
 _CAMPAIGN_ENGINES = ("crowbar", "emfi")  # crowbar → CDC1, emfi → CDC0
+# The width axis is engine-specific: the crowbar driver pulses in
+# nanoseconds (8..50000 ns) while the EMFI driver pulses in microseconds
+# (1..50 µs). A single shared default is wrong for one of them — a
+# crowbar-style ns triplet run as an EMFI sweep is read as µs and
+# rejected by the firmware's per-shot configure (see
+# CampaignFormState.validate). So keep one sensible default per engine
+# and swap the width field when the operator toggles the engine Select.
+_DEFAULT_WIDTH = {
+    "crowbar": "200:300:100",  # ns  (start:end:step, within 8..50000)
+    "emfi": "1:10:2",  # µs  (start:end:step, within 1..50)
+}
 # Both engines share the same trigger enum (EmfiTrigger / CrowbarTrigger
 # have identical members). The campaign_proto CONFIG carries no trigger
 # field — the firmware inherits the per-shot trigger from the engine
@@ -355,7 +366,9 @@ class CampaignFormState(_DictFormMixin):
     engine: str = "crowbar"
     trigger: str = "immediate"  # per-shot trigger, applied to the module
     delay: str = "1000:3000:1000"  # µs (text triplet, parsed on validate)
-    width: str = "200:300:100"  # ns for crowbar, µs for emfi
+    # Default matches the default engine (crowbar → ns); the modal swaps
+    # this to the µs default when the engine Select is flipped to emfi.
+    width: str = _DEFAULT_WIDTH["crowbar"]  # ns for crowbar, µs for emfi
     power: str = "1:1:0"  # crowbar 1=LP / 2=HP
     settle_ms: int = 50
 
@@ -452,6 +465,16 @@ class CampaignControlModal(_StatusLineMixin, ModalScreen[None]):
         self.start_cb = start_cb
         self.stop_cb = stop_cb
         self.drain_cb = drain_cb
+        # Per-engine width memory. Crowbar pulses in ns, EMFI in µs, so
+        # each engine keeps its own width triplet: seed both from the
+        # engine defaults, then override the *current* engine's slot with
+        # whatever the initial/persisted state carried. On an engine
+        # toggle we stash the field under the outgoing engine and restore
+        # the incoming one — so the width always tracks the engine's
+        # units, and a value the operator typed is remembered, not lost.
+        self._width_by_engine = dict(_DEFAULT_WIDTH)
+        self._width_by_engine[self.state.engine] = self.state.width
+        self._current_engine = self.state.engine
 
     @staticmethod
     def requires_hv_confirm(action: str) -> bool:
@@ -524,6 +547,32 @@ class CampaignControlModal(_StatusLineMixin, ModalScreen[None]):
             return False
         self.state = candidate
         return True
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        """Swap the width field to the engine's own triplet when the
+        operator flips the engine Select. Crowbar pulses in ns (8..50000),
+        EMFI in µs (1..50) — a single width can't serve both. We stash the
+        current field under the outgoing engine and restore the incoming
+        one (its default, or whatever the operator last had for it), so
+        the width always tracks the selected engine's units without losing
+        a value they typed for the other engine."""
+        if event.select.id != "engine":
+            return
+        engine = event.value
+        if not isinstance(engine, str) or engine not in self._width_by_engine:
+            return
+        if engine == self._current_engine:
+            return
+        try:
+            width_input = self.query_one("#width", Input)
+        except Exception:
+            return
+        # Stash the field under the engine we're leaving, then restore
+        # the one we're switching to.
+        self._width_by_engine[self._current_engine] = width_input.value
+        width_input.value = self._width_by_engine[engine]
+        self._current_engine = engine
+        self._set_status(f"width → {engine} ({width_input.value})")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         # Each callback dispatches the CDC1 op to a daemon thread
