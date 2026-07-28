@@ -37,6 +37,8 @@ from typing import Literal
 
 from ..core.usb import cdc_for
 from ._base import BinaryProtoClient
+from .crowbar import CrowbarErr
+from .emfi import EmfiErr
 
 CMD_CONFIG = 0x20
 CMD_START = 0x21
@@ -74,6 +76,29 @@ class CampaignErr(IntEnum):
     INTERNAL = 5
 
 
+_ERR_HINTS: dict[CampaignErr, str] = {
+    CampaignErr.BAD_CONFIG: (
+        "sweep config rejected — check each axis is start<=end with step>0 "
+        "(step 0 collapses to start) and that total steps > 0"
+    ),
+    CampaignErr.NOT_CONFIGURED: (
+        "run Configure before Start — the firmware rejects Start until a "
+        "valid sweep config has been applied"
+    ),
+    CampaignErr.BUS_BUSY: (
+        "the engine bus was busy — another op held the CDC mid-step; "
+        "Stop, wait a moment, then retry"
+    ),
+    CampaignErr.STEP_FAILED: (
+        "a sweep step failed — the engine's fire/verify errored; the "
+        "decoded fire=/verify= codes on the failing result line below say why"
+    ),
+    CampaignErr.INTERNAL: (
+        "internal firmware fault — Stop the sweep, then reconfigure and retry"
+    ),
+}
+
+
 class ProtoStatus(IntEnum):
     """1-byte status replies from CONFIG / START / STOP."""
 
@@ -102,6 +127,71 @@ class CampaignStatus:
             ("results_pushed", str(self.results_pushed)),
             ("results_dropped", str(self.results_dropped)),
         ]
+
+    def err_hint(self) -> str:
+        """Human-readable, actionable explanation for the current error
+        code, or ``""`` when there's no error. Mirrors the engine-level
+        ``_ERR_HINTS`` maps (emfi/crowbar) so an opaque ``STEP_FAILED``
+        turns into a line the operator can act on."""
+        if self.err == CampaignErr.NONE:
+            return ""
+        return _ERR_HINTS.get(self.err, "")  # type: ignore[arg-type]
+
+
+class CampaignFireStatus(IntEnum):
+    """``campaign_fire_status_t`` — the executor's OWN codes for a step's
+    ``fire_status`` byte, mirroring ``services/campaign_manager/
+    campaign_manager.h``.
+
+    These are distinct from the per-engine ``*_err_t`` values: a step's
+    ``fire_status`` uses three disjoint namespaces so the byte decodes
+    unambiguously (see :func:`decode_fire_status`):
+
+    * ``0x00``       — step fired cleanly (``OK``)
+    * ``0x80..0xBF`` — the engine entered its ERROR state; the real
+      ``*_err_t`` is in the low 7 bits (``ENGINE_ERR_FLAG`` marks it)
+    * ``0xE0..0xEF`` — an executor-phase failure (this enum)
+    """
+
+    OK = 0x00
+    CONFIGURE_ERR = 0xE1
+    ARM_ERR = 0xE2
+    CHARGE_TIMEOUT = 0xE3
+    FIRE_REJECTED = 0xE4
+    ENGINE_STUCK = 0xE5
+
+
+# Marker bit OR'd with a real ``*_err_t`` when the engine enters ERROR.
+CAMPAIGN_FIRE_ENGINE_ERR_FLAG = 0x80
+
+_ENGINE_ERR: dict[str, type[IntEnum]] = {"emfi": EmfiErr, "crowbar": CrowbarErr}
+
+
+def decode_fire_status(engine: str, code: int) -> str:
+    """Human-readable name for a step's ``fire_status``/``verify_status``
+    byte, decoded against the right namespace by range. Returns ``""`` for
+    a clean (``0x00``) or undecodable code so callers can fall back to raw
+    hex.
+
+    * ``0x80..0xBF`` → engine ERROR: ``engine:<ERR_NAME>`` (e.g.
+      ``emfi:HV_NOT_CHARGED``)
+    * ``0xE0..0xEF`` → executor phase: the :class:`CampaignFireStatus` name
+    * anything else  → ``""``
+    """
+    if code == 0:
+        return ""
+    if CAMPAIGN_FIRE_ENGINE_ERR_FLAG <= code <= 0xBF:
+        enum = _ENGINE_ERR.get(engine)
+        if enum is not None:
+            try:
+                return f"{engine}:{enum(code & 0x7F).name}"
+            except ValueError:
+                return ""
+        return ""
+    try:
+        return CampaignFireStatus(code).name
+    except ValueError:
+        return ""
 
 
 @dataclass
@@ -301,6 +391,8 @@ __all__ = [
     "Engine",
     "CampaignState",
     "CampaignErr",
+    "CampaignFireStatus",
+    "decode_fire_status",
     "ProtoStatus",
     "CampaignStatus",
     "CampaignResult",

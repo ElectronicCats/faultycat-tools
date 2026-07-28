@@ -68,7 +68,7 @@ from ..protocols import (
     ProtocolError,
     ScannerClient,
 )
-from ..protocols.campaign import CampaignState
+from ..protocols.campaign import CampaignState, decode_fire_status
 from ..protocols.crowbar import CrowbarOutput, CrowbarTrigger
 from ..protocols.emfi import EmfiTrigger
 from .modals import (
@@ -129,6 +129,35 @@ class DiagSnapshot:
             crow=m.group("crow"),
             last_seen_at=time.time(),
         )
+
+
+# -----------------------------------------------------------------------------
+# Result-line decoding — a step's fire_status / verify_status byte is NOT a
+# bare `*_err_t`. It uses three disjoint namespaces (see decode_fire_status):
+# 0x00 clean, 0xE0..0xEF executor-phase failures (configure/arm/charge/fire),
+# and 0x80|err when the engine itself entered ERROR. Reinterpreting every byte
+# as `*_err_t` is exactly the bug that made a charge race show as
+# "TRIGGER_TIMEOUT" (EmfiErr(3)) — so decode by range via decode_fire_status.
+# -----------------------------------------------------------------------------
+
+
+def _decorate_result(engine: str, r) -> str:
+    """Render a campaign result line, appending a decoded, highlighted
+    suffix whenever a step's fire/verify status is non-zero so the
+    operator sees *why* a step failed (e.g. ``fire=CHARGE_TIMEOUT`` or
+    ``fire=emfi:HV_NOT_CHARGED``) instead of a bare ``fire=0x03``. Clean
+    steps render unchanged."""
+    line = r.render_line()
+    tags: list[str] = []
+    if r.fire_status:
+        nm = decode_fire_status(engine, r.fire_status)
+        tags.append(f"fire={nm}" if nm else f"fire=0x{r.fire_status:02X}")
+    if r.verify_status:
+        nm = decode_fire_status(engine, r.verify_status)
+        tags.append(f"verify={nm}" if nm else f"verify=0x{r.verify_status:02X}")
+    if tags:
+        line += "  [bold red](" + ", ".join(tags) + ")[/bold red]"
+    return line
 
 
 # -----------------------------------------------------------------------------
@@ -365,11 +394,13 @@ class CampaignPanel(Static):
     def __init__(self) -> None:
         super().__init__()
         self.summary: dict[str, str] = {}
+        self.error_hint: str = ""
         self.tail: list[str] = []
         self._render_self()
 
-    def set_summary(self, fields: dict[str, str]) -> None:
+    def set_summary(self, fields: dict[str, str], error_hint: str = "") -> None:
         self.summary = fields
+        self.error_hint = error_hint
         self._render_self()
 
     def push_results(self, lines: list[str]) -> None:
@@ -383,13 +414,30 @@ class CampaignPanel(Static):
         self._render_self()
 
     def _render_self(self) -> None:
-        lines = ["[bold cyan]Campaign[/bold cyan]"]
+        is_error = self.summary.get("state") == "ERROR"
+        header = (
+            "[bold red]Campaign — ERROR[/bold red]"
+            if is_error
+            else "[bold cyan]Campaign[/bold cyan]"
+        )
+        lines = [header]
         if self.summary:
             width = max((len(k) for k in self.summary), default=0)
             for k, v in self.summary.items():
-                lines.append(f"  [cyan]{k:<{width}}[/cyan]  {v}")
+                # Paint the state/err values red when they signal a fault so
+                # the eye lands on them before reading the hint below.
+                if k == "state" and v == "ERROR":
+                    val = f"[bold red]{v}[/bold red]"
+                elif k == "err" and v not in ("NONE", ""):
+                    val = f"[red]{v}[/red]"
+                else:
+                    val = v
+                lines.append(f"  [cyan]{k:<{width}}[/cyan]  {val}")
         else:
             lines.append("[dim](no data yet)[/dim]")
+        if self.error_hint:
+            lines.append("")
+            lines.append(f"  [yellow]→ {self.error_hint}[/yellow]")
         lines.append("")
         lines.append(f"[dim]last {self.MAX_TAIL} results:[/dim]")
         if self.tail:
@@ -590,7 +638,7 @@ class FaultycmdTUI(App[None]):
         if camp_st.state in (CampaignState.SWEEPING, CampaignState.DONE):
             results = client.drain(18)
             if results:
-                rendered = [r.render_line() for r in results]
+                rendered = [_decorate_result(client.engine, r) for r in results]
                 self._post(self._push_campaign_results, rendered)
 
     def _poll_emfi(self) -> None:
@@ -678,7 +726,7 @@ class FaultycmdTUI(App[None]):
     def _update_campaign_summary(self, st) -> None:
         if self.campaign_panel is None:
             return
-        self.campaign_panel.set_summary(dict(st.as_rows()))
+        self.campaign_panel.set_summary(dict(st.as_rows()), st.err_hint())
 
     def _push_campaign_results(self, rendered: list[str]) -> None:
         if self.campaign_panel is None:
@@ -1137,8 +1185,31 @@ class FaultycmdTUI(App[None]):
                 return
             # Pin the engine the panel + start/stop/drain now follow.
             self._campaign_engine = state.engine
+            trig_name = state.trigger.upper()
 
             def _task() -> None:
+                # The campaign_proto CONFIG has no trigger field — the
+                # firmware inherits the per-shot trigger from the engine
+                # module's own configure. Pin it here, right before the
+                # sweep config, so the operator no longer has to set it
+                # via the separate EMFI/Crowbar modal first. The
+                # delay/width/output passed here are overwritten per
+                # step by the sweep; we hand the axis-start values just
+                # to keep this module configure valid.
+                if state.engine == "emfi" and self.conn.emfi:
+                    self.conn.emfi.configure(
+                        trigger=EmfiTrigger[trig_name],
+                        delay_us=delay[0],
+                        width_us=width[0],
+                        charge_timeout_ms=0,
+                    )
+                elif state.engine == "crowbar" and self.conn.crowbar:
+                    self.conn.crowbar.configure(
+                        trigger=CrowbarTrigger[trig_name],
+                        output=CrowbarOutput.HP if power[0] == 2 else CrowbarOutput.LP,
+                        delay_us=delay[0],
+                        width_ns=width[0],
+                    )
                 client.configure(
                     delay=delay,
                     width=width,
@@ -1183,7 +1254,7 @@ class FaultycmdTUI(App[None]):
                     self._post(_show, f"drain: {err}")
                     return
                 if results and self.campaign_panel is not None:
-                    rendered = [r.render_line() for r in results]
+                    rendered = [_decorate_result(client.engine, r) for r in results]
                     self._post(self.campaign_panel.push_results, rendered)
                 self._post(_show, f"OK drain ({len(results)} results)")
 

@@ -44,7 +44,7 @@ auto-discovery for that engine.
 | Command                                   | Description                         |
 | ------------------------------------------ | -------------------------------------- |
 | `campaign status`                          | Show sweep state                     |
-| `campaign configure --delay R --width R --power R [--settle-ms N]` | Define sweep ranges (`R` = `START:END:STEP` or fixed) |
+| `campaign configure --delay R --width R --power R [--trigger T] [--settle-ms N]` | Define sweep ranges (`R` = `START:END:STEP` or fixed; `T` = `immediate`/`ext_rising`/`ext_falling`/`ext_pulse_pos`/`ext_pulse_neg`, applied to the engine before the sweep) |
 | `campaign start`                           | Start the sweep                      |
 | `campaign watch [--every-ms N]`            | Follow the sweep live                |
 | `campaign drain [--max N]`                 | Download buffered results (max 18/request) |

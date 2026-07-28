@@ -4,15 +4,15 @@ on:
   push:
     branches:
       - main
-      - i2c_scanner
+      - fix/Trigger_campaign
   release:
     types: [created]
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release tag to upload assets to (ex: v1.0.1)'
+        description: 'Release tag to upload assets to (ex: v1.0.2)'
         required: false
-        default: 'v1.0.1'
+        default: 'v1.0.2'
 
 jobs:
   build-windows:

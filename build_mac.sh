@@ -31,7 +31,7 @@ ln -sf "${INSTALL_LOCATION}/faultycmd/faultycmd" "${PKG_ROOT}${BIN_DIR}/faultycm
 
 VERSION=$(cat VERSION | tr -d '[:space:]')
 if [ -z "$VERSION" ]; then
-  VERSION="1.0.1"
+  VERSION="1.0.2"
 fi
 
 IDENTIFIER="com.electroniccats.faultycat"

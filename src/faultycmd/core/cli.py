@@ -63,6 +63,7 @@ from ..protocols import (
     ScannerError,
     parse_scan_i2c_match,
 )
+from ..protocols.campaign import decode_fire_status
 from ..protocols.crowbar import CrowbarOutput, CrowbarTrigger
 from ..protocols.emfi import EmfiState, EmfiTrigger
 from ..protocols.i2c_decode import decode_i2c
@@ -142,6 +143,36 @@ def _engine_to_client(engine: str, port: str | None) -> CampaignClient:
     if port is not None:
         return CampaignClient(port, engine=engine)  # type: ignore[arg-type]
     return CampaignClient.discover(engine)  # type: ignore[arg-type]
+
+
+def _apply_campaign_trigger(
+    engine: str,
+    port: str | None,
+    trigger: str,
+    delay: tuple[int, int, int],
+    width: tuple[int, int, int],
+    power: tuple[int, int, int],
+) -> None:
+    """Pin the per-shot trigger on the engine module before a sweep.
+
+    ``campaign_proto`` CONFIG carries no trigger field — the firmware
+    inherits the per-shot trigger from the engine module's own configure
+    — so we set it here once, right before configuring the sweep. The
+    delay/width/output handed to the module are overwritten per step by
+    the sweep; we pass the axis-start values only to keep this configure
+    valid (e.g. EMFI width must land in the 1..50 µs driver bound).
+    """
+    if engine == "emfi":
+        trig = EmfiTrigger[trigger.upper()]
+        client = EmfiClient(port) if port is not None else EmfiClient.discover()
+        with client as cli:
+            cli.configure(trig, delay[0], width[0], 0)
+    else:
+        c_trig = CrowbarTrigger[trigger.upper()]
+        out = CrowbarOutput.HP if power[0] == 2 else CrowbarOutput.LP
+        c_client = CrowbarClient(port) if port is not None else CrowbarClient.discover()
+        with c_client as cli:
+            cli.configure(c_trig, out, delay[0], width[0])
 
 
 def _print_status_table(title: str, rows: list[tuple[str, str]]) -> None:
@@ -653,6 +684,9 @@ def campaign_status(ctx: click.Context) -> None:
     with _campaign_client(ctx) as cli:
         st = cli.status()
     _print_status_table(f"Campaign status ({ctx.obj[0]})", st.as_rows())
+    hint = st.err_hint()
+    if hint:
+        print_warning(hint)
 
 
 @campaign.command("configure")
@@ -670,6 +704,14 @@ def campaign_status(ctx: click.Context) -> None:
     help="Power range. On crowbar: 1=low, 2=high. Ignored on EMFI.",
 )
 @click.option(
+    "--trigger",
+    type=click.Choice([t.name.lower() for t in EmfiTrigger]),
+    default="immediate",
+    show_default=True,
+    help="Per-shot trigger source for the whole sweep. Applied to the "
+    "engine module before the sweep runs (the campaign inherits it).",
+)
+@click.option(
     "--settle-ms",
     type=int,
     default=0,
@@ -682,17 +724,18 @@ def campaign_configure(
     delay: str,
     width: str,
     power: str,
+    trigger: str,
     settle_ms: int,
 ) -> None:
     """Define the sweep ranges."""
+    engine, port = ctx.obj
+    delay_t = _parse_axis(delay)
+    width_t = _parse_axis(width)
+    power_t = _parse_axis(power)
+    _apply_campaign_trigger(engine, port, trigger, delay_t, width_t, power_t)
     with _campaign_client(ctx) as cli:
-        cli.configure(
-            _parse_axis(delay),
-            _parse_axis(width),
-            _parse_axis(power),
-            settle_ms=settle_ms,
-        )
-    print_success("Configured")
+        cli.configure(delay_t, width_t, power_t, settle_ms=settle_ms)
+    print_success(f"Configured (trigger={trigger})")
 
 
 @campaign.command("start")
@@ -713,6 +756,14 @@ def campaign_stop(ctx: click.Context) -> None:
     print_success("Stopped")
 
 
+def _fmt_fire_status(engine: str, code: int) -> str:
+    """Table cell for a step's fire/verify byte: the decoded cause when the
+    byte is a known executor-phase or engine-error code (e.g.
+    ``CHARGE_TIMEOUT``, ``emfi:HV_NOT_CHARGED``), else raw hex."""
+    nm = decode_fire_status(engine, code)
+    return nm if nm else f"0x{code:02X}"
+
+
 @campaign.command("drain")
 @click.option(
     "--max",
@@ -725,6 +776,7 @@ def campaign_stop(ctx: click.Context) -> None:
 @click.pass_context
 def campaign_drain(ctx: click.Context, max_count: int) -> None:
     """Download the accumulated sweep results."""
+    engine = ctx.obj[0]
     rows: list[tuple] = []
     with _campaign_client(ctx) as cli:
         for r in cli.drain_all():
@@ -734,8 +786,8 @@ def campaign_drain(ctx: click.Context, max_count: int) -> None:
                     r.delay,
                     r.width,
                     r.power,
-                    f"0x{r.fire_status:02X}",
-                    f"0x{r.verify_status:02X}",
+                    _fmt_fire_status(engine, r.fire_status),
+                    _fmt_fire_status(engine, r.verify_status),
                     f"0x{r.target_state:08X}",
                     r.ts_us,
                 )
@@ -786,8 +838,8 @@ def campaign_watch(ctx: click.Context, every_ms: int) -> None:
                 str(r.delay),
                 str(r.width),
                 str(r.power),
-                f"0x{r.fire_status:02X}",
-                f"0x{r.verify_status:02X}",
+                _fmt_fire_status(engine, r.fire_status),
+                _fmt_fire_status(engine, r.verify_status),
                 f"0x{r.target_state:08X}",
             )
         return t
@@ -803,10 +855,16 @@ def campaign_watch(ctx: click.Context, every_ms: int) -> None:
             live.update(_render())
     if last_status is not None:
         st = last_status
-        print_success(
+        summary = (
             f"done state={getattr(st.state, 'name', st.state)} "
             f"step={st.step_n}/{st.total_steps} pushed={st.results_pushed} dropped={st.results_dropped}"
         )
+        hint = st.err_hint()
+        if hint:
+            print_error(summary)
+            print_warning(hint)
+        else:
+            print_success(summary)
 
 
 # -----------------------------------------------------------------------------

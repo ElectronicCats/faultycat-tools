@@ -374,10 +374,41 @@ def test_campaign_form_state_parse_emits_triplets():
 
 def test_campaign_form_state_validates_engine():
     # Both engines are now supported (crowbar → CDC1, emfi → CDC0).
+    # The default width (200:300:100) is a crowbar (ns) triplet; an EMFI
+    # sweep needs a width within the 1..50 µs driver bound, so give one.
     CampaignFormState(engine="crowbar").validate()
-    CampaignFormState(engine="emfi").validate()
+    CampaignFormState(engine="emfi", width="5:5:0").validate()
     with pytest.raises(ValueError):
         CampaignFormState(engine="bogus").validate()
+
+
+def test_campaign_form_state_validates_width_per_engine():
+    # A crowbar-style width (ns) run as an EMFI sweep is read as µs and
+    # blows past the 1..50 µs driver bound — the firmware would reject
+    # every step and the HV would never charge, so surface it up front.
+    with pytest.raises(ValueError):
+        CampaignFormState(engine="emfi", width="200:300:100").validate()
+    with pytest.raises(ValueError):
+        CampaignFormState(engine="emfi", width="60:60:0").validate()
+    CampaignFormState(engine="emfi", width="1:50:1").validate()
+    # Crowbar keeps its own ns bound (8..50000); the default is valid.
+    CampaignFormState(engine="crowbar", width="200:300:100").validate()
+    with pytest.raises(ValueError):
+        CampaignFormState(engine="crowbar", width="4:4:0").validate()
+
+
+def test_campaign_form_state_validates_trigger():
+    # Both engines share the same trigger set; default is immediate.
+    CampaignFormState(engine="emfi", width="5:5:0", trigger="immediate").validate()
+    CampaignFormState(engine="crowbar", trigger="ext_rising").validate()
+    with pytest.raises(ValueError):
+        CampaignFormState(trigger="bogus").validate()
+
+
+def test_campaign_form_state_trigger_defaults_and_roundtrips():
+    assert CampaignFormState().trigger == "immediate"
+    s = CampaignFormState(engine="emfi", width="1:50:1", trigger="ext_falling")
+    assert CampaignFormState.from_dict(s.to_dict()) == s
 
 
 def test_campaign_form_state_validates_settle_ms():
