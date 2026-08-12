@@ -78,6 +78,33 @@ def _macos_port(
     )
 
 
+def _macos_hub_port(
+    dev: str,
+    vid: int,
+    pid: int,
+    iface_string: str | None = None,
+) -> FakePort:
+    """macOS pyserial output when the board sits one hub level deep, as
+    on the reported bug (joegrand's Mac): pyserial's
+    ``list_ports_osx.location_to_string`` renders the *device*-level USB
+    topology with a dotted nibble (e.g. ``2-1.2``), and that same string
+    is shared verbatim across all four CDC interfaces of the composite.
+
+    The trailing ``.2`` is a hub-port nibble, NOT an interface number.
+    Only the device name's trailing digit distinguishes the interfaces."""
+    return FakePort(
+        device=dev,
+        vid=vid,
+        pid=pid,
+        hwid=(
+            f"USB VID:PID={vid:04X}:{pid:04X} "
+            "SER=FLT3-E6633C805B3A3827 LOCATION=2-1.2"
+        ),
+        location="2-1.2",
+        interface=iface_string,
+    )
+
+
 @pytest.fixture
 def linux_environment(monkeypatch):
     """ttyACM0..3 belong to FaultyCat at IF 0/2/4/6, ttyACM4 is FTDI."""
@@ -125,6 +152,42 @@ def macos_with_iinterface_environment(monkeypatch):
         ),
         _macos_port("/dev/cu.usbmodem14205", 0x1209, 0xFA17, "FaultyCat Scanner Shell"),
         _macos_port("/dev/cu.usbmodem14207", 0x1209, 0xFA17, "FaultyCat Target UART"),
+    ]
+    monkeypatch.setattr("faultycmd.core.usb.list_ports.comports", lambda: ports)
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    return ports
+
+
+@pytest.fixture
+def macos_hub_environment(monkeypatch):
+    """The reported bug's real shape: 4 FaultyCat CDCs behind a hub, so
+    every port shares the dotted device-location ``2-1.2`` and pyserial
+    does NOT populate ``port.interface``. The old code read the trailing
+    ``.2`` as interface 2 and labelled all four ``crowbar``."""
+    ports = [
+        _macos_hub_port("/dev/cu.usbmodem2121201", 0x1209, 0xFA17),
+        _macos_hub_port("/dev/cu.usbmodem2121203", 0x1209, 0xFA17),
+        _macos_hub_port("/dev/cu.usbmodem2121205", 0x1209, 0xFA17),
+        _macos_hub_port("/dev/cu.usbmodem2121207", 0x1209, 0xFA17),
+    ]
+    monkeypatch.setattr("faultycmd.core.usb.list_ports.comports", lambda: ports)
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    return ports
+
+
+@pytest.fixture
+def macos_hub_shared_iinterface_environment(monkeypatch):
+    """Same dotted-location hub shape, but pyserial DOES surface an
+    iInterface string — and because it derives that from the shared
+    device-level locationID, it returns the SAME string (interface 0's)
+    for all four CDCs. The per-port device name must still win, or every
+    port collapses onto emfi."""
+    shared = "FaultyCat EMFI Control"
+    ports = [
+        _macos_hub_port("/dev/cu.usbmodem2121201", 0x1209, 0xFA17, shared),
+        _macos_hub_port("/dev/cu.usbmodem2121203", 0x1209, 0xFA17, shared),
+        _macos_hub_port("/dev/cu.usbmodem2121205", 0x1209, 0xFA17, shared),
+        _macos_hub_port("/dev/cu.usbmodem2121207", 0x1209, 0xFA17, shared),
     ]
     monkeypatch.setattr("faultycmd.core.usb.list_ports.comports", lambda: ports)
     monkeypatch.setattr("shutil.which", lambda _name: None)
@@ -240,6 +303,34 @@ def test_cdc_for_emfi_macos_via_iinterface(macos_with_iinterface_environment):
 
 def test_cdc_for_target_macos_via_iinterface(macos_with_iinterface_environment):
     assert usb.cdc_for("target") == "/dev/cu.usbmodem14207"
+
+
+# -- macOS — dotted (hub) location must NOT be read as an interface ---
+
+
+def test_discover_macos_hub_maps_distinct_interfaces(macos_hub_environment):
+    # Regression for the reported bug: a shared dotted location `2-1.2`
+    # must not collapse all four CDCs onto interface 2 (crowbar).
+    ports = usb.discover()
+    assert len(ports) == 4
+    assert {p.interface for p in ports} == {0, 2, 4, 6}
+
+
+def test_cdc_for_roles_macos_hub(macos_hub_environment):
+    assert usb.cdc_for("emfi") == "/dev/cu.usbmodem2121201"
+    assert usb.cdc_for("crowbar") == "/dev/cu.usbmodem2121203"
+    assert usb.cdc_for("scanner") == "/dev/cu.usbmodem2121205"
+    assert usb.cdc_for("target") == "/dev/cu.usbmodem2121207"
+
+
+def test_macos_device_name_wins_over_shared_iinterface(
+    macos_hub_shared_iinterface_environment,
+):
+    # When pyserial reports the same iInterface string for every CDC,
+    # the distinct per-port device name is the only reliable signal.
+    ports = usb.discover()
+    assert {p.interface for p in ports} == {0, 2, 4, 6}
+    assert usb.cdc_for("target") == "/dev/cu.usbmodem2121207"
 
 
 def test_cdc_for_unknown_role_raises(linux_environment):
