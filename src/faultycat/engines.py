@@ -87,9 +87,22 @@ class EmfiEngine:
     def disarm(self) -> None:
         self._c.disarm()
 
-    def glitch(self, trigger_timeout_ms: int = 60000) -> EmfiStatus:
-        """Convenience one-shot: apply -> arm -> fire -> return status."""
+    def glitch(
+        self, trigger_timeout_ms: int = 60000, charge_timeout_s: float = 5.0
+    ) -> EmfiStatus:
+        """Convenience one-shot: apply -> arm -> wait for HV charge -> fire -> status.
+
+        ``arm()`` only kicks off HV charging — the firmware reaches CHARGED
+        asynchronously a moment later. Firing before that returns a
+        misleading ``INTERNAL`` error (really "HV not charged yet"), so this
+        waits for CHARGED first, same as the ``emfi arm`` CLI command does.
+        """
         self.arm()
+        if not self.wait_for_charged(charge_timeout_s):
+            raise TimeoutError(
+                f"HV cap did not reach CHARGED within {charge_timeout_s:.1f}s "
+                "(check cat.emfi.status, or raise charge_timeout_s)"
+            )
         self.fire(trigger_timeout_ms)
         return self.status
 
