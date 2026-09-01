@@ -9,10 +9,12 @@ present.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 import faultycat as fc
-from faultycat._compat import EmfiTrigger, coerce_enum
+from faultycat._compat import EmfiState, EmfiTrigger, coerce_enum
 from faultycat.engines import CrowbarEngine, EmfiEngine
 
 
@@ -21,6 +23,10 @@ class StubClient:
 
     def __init__(self):
         self.calls = []
+        # glitch() polls this via wait_for_charged() before firing; default
+        # to already-charged so the stub behaves like the simulator (ARM ->
+        # CHARGED synchronously) rather than real hardware's async charge.
+        self.status_state = EmfiState.CHARGED
 
     def configure(self, *args):
         self.calls.append(("configure", args))
@@ -36,7 +42,7 @@ class StubClient:
 
     def status(self):
         self.calls.append(("status", ()))
-        return "STATUS"
+        return SimpleNamespace(state=self.status_state)
 
     def capture(self, offset=0, length=512):
         self.calls.append(("capture", (offset, length)))
@@ -70,7 +76,8 @@ def test_emfi_glitch_sequence_and_coercion():
     emfi.glitch()
 
     kinds = [c[0] for c in stub.calls]
-    assert kinds == ["configure", "arm", "fire", "status"]
+    # wait_for_charged() polls status once (already CHARGED) before firing.
+    assert kinds == ["configure", "arm", "status", "fire", "status"]
     # configure got the coerced trigger int + our delay/width.
     _, cfg_args = stub.calls[0]
     assert cfg_args == (int(EmfiTrigger.EXT_FALLING), 120, 8, 0)
