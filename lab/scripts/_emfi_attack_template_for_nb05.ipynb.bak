@@ -1,0 +1,139 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# 04 · EMFI attack — trigger, glitch, observe, classify\n",
+    "\n",
+    "A full EMFI attack loop against a real target, in the style of\n",
+    "[SimpleLink-FI notebook 5 (ChipSHOUTER-PicoEMP)](https://github.com/KULeuven-COSIC/SimpleLink-FI/blob/main/notebooks/5_ChipSHOUTER-PicoEMP.ipynb)\n",
+    "— FaultyCat is a PicoEMP remix, so the technique is the same. The loop is\n",
+    "consolidated with `fc.GlitchController` (like ChipWhisperer's): it owns the\n",
+    "parameter sweep, the per-attempt classification, and the result map — the\n",
+    "target-specific glitch+observe stays in the loop body.\n",
+    "\n",
+    "> ⚠️ **High voltage.** EMFI charges an HV cap and discharges it through the\n",
+    "> coil. Shield on. This loop fires for real."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import faultycat as fc\n",
+    "\n",
+    "# --- edit for your target ---\n",
+    "SIM       = False              # True to dry-run without a board\n",
+    "RST_GP    = None              # FaultyCat GP wired to target nRST (None = skip reset)\n",
+    "CMD       = b'\\xAA'           # byte that makes the target run the target code\n",
+    "EXPECTED  = b\"\\x10'\\x00\\x00\"  # the target's NORMAL answer (== no fault)\n",
+    "WIDTH_US  = 10                # EMFI pulse width\n",
+    "DELAYS    = range(0, 500, 20) # trigger->pulse delay sweep (µs)\n",
+    "REPEATS   = 5                 # attempts per delay\n",
+    "\n",
+    "cat = fc.connect(simulator=SIM)\n",
+    "cat.emfi"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Your success condition\n",
+    "\n",
+    "As in ChipWhisperer, **you** decide what a hit is by observing the target:\n",
+    "normal = `EXPECTED`; a different answer = **fault** (success); nothing back =\n",
+    "**crash**."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def classify(ret: bytes) -> str:\n",
+    "    if ret == EXPECTED:\n",
+    "        return 'normal'\n",
+    "    if not ret:\n",
+    "        return 'crash'\n",
+    "    return 'success'      # corrupted answer = fault injected"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## The attack loop\n",
+    "\n",
+    "`GlitchController` iterates the grid and collects results; you fill the loop\n",
+    "body. Order matters: `fire()` **arms** the trigger wait and returns, so we\n",
+    "send `CMD` *after* it — the target then raises the trigger and the pulse\n",
+    "fires mid-computation."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "gc = fc.GlitchController(['delay', 'width'], groups=['success', 'crash', 'normal', 'error'])\n",
+    "gc.set_range('delay', DELAYS).set_range('width', [WIDTH_US] * REPEATS)  # repeats via duplicate values\n",
+    "\n",
+    "cat.emfi.trigger = 'ext_rising'\n",
+    "if cat.uart:\n",
+    "    cat.uart.open()\n",
+    "\n",
+    "for p in gc.glitch_values():\n",
+    "    cat.emfi.delay_us = p['delay']\n",
+    "    cat.emfi.width_us = p['width']\n",
+    "    if RST_GP is not None:\n",
+    "        cat.target_reset(RST_GP)              # clean state (their thorough_reset_dut)\n",
+    "    try:\n",
+    "        cat.emfi.arm()\n",
+    "        cat.emfi.wait_for_charged()           # their wait_for_hv()\n",
+    "        if cat.uart:\n",
+    "            cat.uart.reset_input()\n",
+    "        cat.emfi.fire(trigger_timeout_ms=200) # arms trigger wait, returns\n",
+    "        if cat.uart:\n",
+    "            cat.uart.write(CMD)               # target runs -> raises trigger -> pulse\n",
+    "        ret = cat.uart.read_until(b'\\n', timeout=0.1) if cat.uart else b''\n",
+    "        gc.add(classify(ret))\n",
+    "    except fc.EngineError:\n",
+    "        gc.add('error')\n",
+    "    finally:\n",
+    "        cat.emfi.disarm()\n",
+    "\n",
+    "gc.counts()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "gc.plot(x='delay', y='width');"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "cat.close()"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
+  "language_info": {"name": "python", "version": "3.10"}
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}

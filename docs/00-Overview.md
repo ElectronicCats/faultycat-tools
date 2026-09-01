@@ -71,3 +71,15 @@ Headline changes on this branch (`i2c_scanner`) since it diverged from `main`:
 | [04-Troubleshooting.md](04-Troubleshooting.md) | Common failure modes and fixes |
 | [PULSEVIEW_SETUP.md](PULSEVIEW_SETUP.md) | Existing deep-dive: wiring PulseView to `la pulseview` |
 | [WINDOWS_SUMP_DTR_ISSUE.md](WINDOWS_SUMP_DTR_ISSUE.md) | Existing deep-dive: Windows DTR root-cause analysis (in Spanish) |
+| [CW-MAPPING.md](CW-MAPPING.md) | ChipWhisperer → FaultyCat mapping for the notebook layer (`import faultycat as fc`) |
+| [architecture.html](architecture.html) | Interactive diagram of the notebook layer (open locally in a browser) |
+
+## Notebook layer (`import faultycat as fc`)
+
+Alongside the CLI/TUI, the repo ships a ChipWhisperer-style Python control layer
+(`src/faultycat/`) for Jupyter — it reuses the same `faultycmd.protocols` clients,
+so there is one source of truth for the wire protocol. Install the notebook extras
+with `pip install -e '.[notebook]'` and open the notebooks under
+[`lab/notebooks/`](../lab/notebooks); [`lab/README.md`](../lab/README.md) and
+[`lab/EXAMPLES.md`](../lab/EXAMPLES.md) walk through the attack→observe→classify
+loop, and [CW-MAPPING.md](CW-MAPPING.md) maps ChipWhisperer concepts onto FaultyCat.

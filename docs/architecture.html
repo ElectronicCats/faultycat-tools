@@ -1,0 +1,595 @@
+<title>Inside faultycat-lab</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #f6f4fb;
+    --surface: #ffffff;
+    --surface-2: #f1edf8;
+    --border: #e3ddef;
+    --border-strong: #d3cae6;
+    --ink: #1a1523;
+    --ink-soft: #574d6d;
+    --ink-faint: #8a80a0;
+    --emfi: #8b2fd6;
+    --crowbar: #b9660a;
+    --scanner: #0c86a0;
+    --uart: #128a56;
+    --accent: var(--emfi);
+    --glow: rgba(139, 47, 214, 0.12);
+    --code-bg: #f4f1fa;
+    --shadow: 0 1px 2px rgba(26, 21, 35, .06), 0 8px 30px rgba(26, 21, 35, .06);
+    --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0c0a12;
+      --surface: #16121f;
+      --surface-2: #1e1830;
+      --border: #2a2339;
+      --border-strong: #392f4e;
+      --ink: #efeaf7;
+      --ink-soft: #b4aac9;
+      --ink-faint: #7d7292;
+      --emfi: #b47bff;
+      --crowbar: #ffab52;
+      --scanner: #56d6ea;
+      --uart: #57d99a;
+      --glow: rgba(180, 123, 255, 0.20);
+      --code-bg: #120f1b;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 40px rgba(0, 0, 0, .35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0c0a12;
+    --surface: #16121f;
+    --surface-2: #1e1830;
+    --border: #2a2339;
+    --border-strong: #392f4e;
+    --ink: #efeaf7;
+    --ink-soft: #b4aac9;
+    --ink-faint: #7d7292;
+    --emfi: #b47bff;
+    --crowbar: #ffab52;
+    --scanner: #56d6ea;
+    --uart: #57d99a;
+    --glow: rgba(180, 123, 255, 0.20);
+    --code-bg: #120f1b;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 40px rgba(0, 0, 0, .35);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0;
+  }
+  h2 { font-size: clamp(22px, 3.4vw, 30px); letter-spacing: -.02em; margin: 12px 0 6px; text-wrap: balance; }
+  h3 { font-size: 16px; margin: 0; letter-spacing: -.01em; }
+  p { color: var(--ink-soft); }
+  code, .mono { font-family: var(--mono); }
+  a { color: var(--accent); }
+
+  /* ---------- hero ---------- */
+  header.hero {
+    position: relative;
+    overflow: hidden;
+    border-bottom: 1px solid var(--border);
+    background:
+      radial-gradient(1200px 400px at 80% -10%, var(--glow), transparent 60%),
+      var(--surface);
+  }
+  .hero-grid {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(var(--border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 44px 44px;
+    opacity: .35;
+    mask-image: radial-gradient(600px 300px at 75% 0%, #000, transparent 75%);
+    pointer-events: none;
+  }
+  .hero-inner { position: relative; padding: 72px 0 60px; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--mono); font-size: 12px; letter-spacing: .08em;
+    color: var(--ink-soft);
+    border: 1px solid var(--border-strong); border-radius: 999px;
+    padding: 5px 12px; background: var(--surface);
+  }
+  .badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+  h1 {
+    font-size: clamp(34px, 6vw, 60px);
+    line-height: 1.02; letter-spacing: -.035em;
+    margin: 22px 0 0; font-weight: 680; text-wrap: balance;
+  }
+  h1 .lit { color: var(--accent); }
+  .lede { font-size: clamp(16px, 2.2vw, 19px); max-width: 60ch; margin: 18px 0 0; }
+  .import-line {
+    margin-top: 26px; display: inline-flex; gap: 0; align-items: stretch;
+    border: 1px solid var(--border-strong); border-radius: 10px; overflow: hidden;
+    box-shadow: var(--shadow); background: var(--code-bg);
+  }
+  .import-line .tick { background: var(--surface-2); color: var(--ink-faint); font-family: var(--mono); font-size: 13px; padding: 10px 12px; border-right: 1px solid var(--border); }
+  .import-line code { padding: 10px 16px; font-size: 14px; color: var(--ink); }
+  .import-line code .kw { color: var(--accent); }
+
+  /* ---------- section frame ---------- */
+  section { padding: 60px 0; border-bottom: 1px solid var(--border); }
+  .sec-head { margin-bottom: 30px; }
+  .sec-head p { max-width: 62ch; margin: 8px 0 0; }
+
+  /* ---------- signal chain (stack) ---------- */
+  .chain { display: grid; gap: 10px; }
+  .layer {
+    display: grid; grid-template-columns: 54px 1fr auto; align-items: center; gap: 18px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px 18px; cursor: pointer; text-align: left; width: 100%;
+    font-family: inherit; color: inherit;
+    transition: border-color .18s, transform .18s, box-shadow .18s;
+  }
+  .layer:hover { border-color: var(--border-strong); transform: translateY(-1px); }
+  .layer:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .layer.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 30px var(--glow); }
+  .layer.pulse { animation: pulse .5s ease; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 1px var(--accent), 0 0 0 var(--glow); } 40% { box-shadow: 0 0 0 2px var(--accent), 0 0 40px 6px var(--glow); background: var(--surface-2); } 100% { box-shadow: none; } }
+  .layer .lnum { font-family: var(--mono); font-size: 13px; color: var(--ink-faint); text-align: center; border-right: 1px solid var(--border); padding-right: 14px; }
+  .layer .ltitle { font-weight: 620; font-size: 15px; }
+  .layer .lsub { color: var(--ink-soft); font-size: 13.5px; }
+  .layer .ltag { font-family: var(--mono); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint); border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; white-space: nowrap; }
+  .layer[data-reuse="1"] .ltag { color: var(--scanner); border-color: color-mix(in srgb, var(--scanner) 45%, var(--border)); }
+  .chain-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 20px; }
+  .btn {
+    font-family: var(--mono); font-size: 13px; letter-spacing: .03em;
+    background: var(--accent); color: #fff; border: none; border-radius: 8px;
+    padding: 10px 16px; cursor: pointer; display: inline-flex; align-items: center; gap: 8px;
+    transition: filter .15s, transform .1s;
+  }
+  .btn:hover { filter: brightness(1.08); }
+  .btn:active { transform: translateY(1px); }
+  .btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .btn .pd { width: 8px; height: 8px; border-radius: 50%; background: #fff; }
+  .hint { font-size: 13px; color: var(--ink-faint); }
+
+  /* ---------- modules ---------- */
+  .mod-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; align-items: start; }
+  @media (max-width: 860px) { .mod-layout { grid-template-columns: 1fr; } }
+  .mod-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 520px) { .mod-grid { grid-template-columns: 1fr; } }
+  .mcard {
+    text-align: left; font-family: inherit; color: inherit; cursor: pointer;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 11px;
+    padding: 14px; display: grid; gap: 5px;
+    transition: border-color .16s, transform .16s, box-shadow .16s;
+    border-left: 3px solid var(--tint, var(--border-strong));
+  }
+  .mcard:hover { transform: translateY(-2px); }
+  .mcard:hover, .mcard.active { border-color: var(--tint, var(--accent)); box-shadow: var(--shadow); }
+  .mcard.active { box-shadow: 0 0 0 1px var(--tint, var(--accent)), var(--shadow); }
+  .mcard:focus-visible { outline: 2px solid var(--tint, var(--accent)); outline-offset: 2px; }
+  .mcard .mname { font-family: var(--mono); font-size: 13.5px; font-weight: 600; color: var(--ink); }
+  .mcard .mrole { font-size: 12.5px; color: var(--ink-soft); line-height: 1.4; }
+  .mcard .mlayer { font-family: var(--mono); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--tint, var(--ink-faint)); }
+
+  .detail {
+    position: sticky; top: 20px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+    box-shadow: var(--shadow); overflow: hidden;
+    border-top: 3px solid var(--tint, var(--accent));
+  }
+  .detail-head { padding: 18px 20px 14px; border-bottom: 1px solid var(--border); }
+  .detail-head .dfile { font-family: var(--mono); font-size: 15px; font-weight: 650; color: var(--tint, var(--accent)); }
+  .detail-head .drole { font-size: 13.5px; color: var(--ink-soft); margin-top: 4px; }
+  .detail-body { padding: 16px 20px 20px; }
+  .detail-body h4 { font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-faint); margin: 0 0 8px; }
+  .apis { list-style: none; padding: 0; margin: 0 0 18px; display: grid; gap: 6px; }
+  .apis li { font-family: var(--mono); font-size: 12.5px; color: var(--ink-soft); padding-left: 16px; position: relative; }
+  .apis li::before { content: "›"; position: absolute; left: 0; color: var(--tint, var(--accent)); }
+  .apis li b { color: var(--ink); font-weight: 600; }
+  pre {
+    margin: 0; background: var(--code-bg); border: 1px solid var(--border);
+    border-radius: 9px; padding: 13px 14px; overflow-x: auto;
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.65; color: var(--ink);
+  }
+  pre .c { color: var(--ink-faint); }
+  pre .k { color: var(--accent); }
+  pre .s { color: var(--uart); }
+
+  /* ---------- CDC channels ---------- */
+  .cdc-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  @media (max-width: 760px) { .cdc-strip { grid-template-columns: 1fr 1fr; } }
+  .cdc {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px; border-top: 3px solid var(--tint);
+    display: grid; gap: 8px;
+  }
+  .cdc .cnum { font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint); }
+  .cdc .cname { font-weight: 640; font-size: 15px; color: var(--tint); }
+  .cdc .cwire { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); }
+  .cdc .cdesc { font-size: 13px; color: var(--ink-soft); line-height: 1.45; }
+  .cdc .cif { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); border-top: 1px dashed var(--border); padding-top: 8px; }
+  .usb-meta { margin-top: 16px; font-family: var(--mono); font-size: 12.5px; color: var(--ink-faint); display: flex; flex-wrap: wrap; gap: 8px 20px; }
+  .usb-meta b { color: var(--ink-soft); font-weight: 600; }
+
+  /* ---------- workflows ---------- */
+  .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 22px; }
+  .tab {
+    font-family: var(--mono); font-size: 13px; cursor: pointer;
+    background: var(--surface); border: 1px solid var(--border); color: var(--ink-soft);
+    border-radius: 8px; padding: 9px 14px; transition: all .15s;
+  }
+  .tab:hover { border-color: var(--border-strong); color: var(--ink); }
+  .tab.active { background: var(--tint, var(--accent)); color: #fff; border-color: transparent; }
+  .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .flow { display: none; }
+  .flow.active { display: grid; grid-template-columns: 1.1fr 1fr; gap: 24px; align-items: start; }
+  @media (max-width: 820px) { .flow.active { grid-template-columns: 1fr; } }
+  .steps { display: grid; gap: 0; counter-reset: s; }
+  .step { display: grid; grid-template-columns: 34px 1fr; gap: 14px; padding-bottom: 22px; position: relative; }
+  .step:not(:last-child)::before { content: ""; position: absolute; left: 16px; top: 30px; bottom: -2px; width: 2px; background: var(--border); }
+  .step .snum { counter-increment: s; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); border: 1px solid var(--border-strong); font-family: var(--mono); font-size: 13px; color: var(--tint, var(--accent)); z-index: 1; }
+  .step .snum::before { content: counter(s); }
+  .step .stitle { font-weight: 600; font-size: 14.5px; }
+  .step .sdesc { font-size: 13px; color: var(--ink-soft); margin-top: 2px; }
+  .step .scall { font-family: var(--mono); font-size: 12px; color: var(--tint, var(--accent)); margin-top: 5px; }
+
+  footer { padding: 50px 0 70px; }
+  .principles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 8px; }
+  @media (max-width: 760px) { .principles { grid-template-columns: 1fr; } }
+  .principle { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+  .principle h4 { margin: 0 0 6px; font-size: 14px; }
+  .principle p { margin: 0; font-size: 13px; }
+  .foot-note { margin-top: 30px; font-size: 12.5px; color: var(--ink-faint); font-family: var(--mono); }
+
+  .theme-toggle {
+    position: fixed; top: 16px; right: 16px; z-index: 10;
+    font-family: var(--mono); font-size: 12px; cursor: pointer;
+    background: var(--surface); border: 1px solid var(--border-strong); color: var(--ink-soft);
+    border-radius: 8px; padding: 7px 11px;
+  }
+  .theme-toggle:hover { color: var(--ink); }
+</style>
+
+<button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">◐ theme</button>
+
+<header class="hero">
+  <div class="hero-grid" aria-hidden="true"></div>
+  <div class="wrap hero-inner">
+    <span class="badge"><span class="dot"></span> faultycat-lab · v0.1.0 · standalone package</span>
+    <h1>Inside <span class="lit">faultycat&#8209;lab</span></h1>
+    <p class="lede">A notebook-first control layer for the FaultyCat v3 fault-injection board — a thin ergonomics skin over the <code>faultycmd</code> transport, so glitching an SoC reads like three lines of Python. Click through the parts below to see how a <code>glitch()</code> call travels from a Jupyter cell to a high-voltage pulse.</p>
+    <div class="import-line">
+      <span class="tick">&gt;&gt;&gt;</span>
+      <code><span class="kw">import</span> faultycat <span class="kw">as</span> fc &nbsp;→&nbsp; cat = fc.connect()</code>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <!-- ============ SIGNAL CHAIN ============ -->
+  <section id="chain">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="eyebrow">The signal chain</p>
+        <h2>Five layers, one call path</h2>
+        <p>Every operation crosses the same stack. The middle rail — the wire protocol, CRC framing and USB discovery — is <b>reused from <code>faultycmd</code></b>, not re-implemented, so there is exactly one source of truth for the FaultyCat protocol. Select a layer to see what it owns, or trace a live call.</p>
+      </div>
+
+      <div class="chain-controls">
+        <button class="btn" id="traceBtn"><span class="pd"></span> Trace a <code style="color:#fff">glitch()</code> call</button>
+        <span class="hint" id="traceHint">Watch the pulse fall through each layer.</span>
+      </div>
+
+      <div class="chain" id="chainStack"></div>
+    </div>
+  </section>
+
+  <!-- ============ MODULES ============ -->
+  <section id="modules">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="eyebrow">The package</p>
+        <h2>Eight modules, colour-coded by engine</h2>
+        <p>Everything under <code>src/faultycat/</code>. Public API on the left, private plumbing at the bottom. Click a module to inspect its job, its key surface, and a snippet.</p>
+      </div>
+
+      <div class="mod-layout">
+        <div class="mod-grid" id="modGrid"></div>
+        <div class="detail" id="detail" aria-live="polite"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CDC CHANNELS ============ -->
+  <section id="cdc">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="eyebrow">The transport</p>
+        <h2>One USB cable, four serial channels</h2>
+        <p>FaultyCat enumerates as a USB composite device. Each engine owns its own CDC (virtual serial port); the session keeps all four open at once. The target-UART is special — its <em>control</em> verbs ride the scanner channel, but its <em>data</em> flows on a channel of its own.</p>
+      </div>
+      <div class="cdc-strip" id="cdcStrip"></div>
+      <div class="usb-meta">
+        <span><b>VID</b> 0x1209</span>
+        <span><b>PID</b> 0xFA17</span>
+        <span><b>IF 8</b> vendor · CMSIS-DAP v2</span>
+        <span><b>IF 9</b> HID · CMSIS-DAP v1</span>
+        <span>(the DAP interfaces are out of faultycat-lab's scope)</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ WORKFLOWS ============ -->
+  <section id="flows">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="eyebrow">Putting it together</p>
+        <h2>Three workflows a notebook does best</h2>
+        <p>The facade exists to make these read like lab notes. Pick one.</p>
+      </div>
+      <div class="tabs" id="flowTabs"></div>
+      <div id="flowPanels"></div>
+    </div>
+  </section>
+
+  <!-- ============ FOOTER ============ -->
+  <footer>
+    <div class="wrap">
+      <p class="eyebrow">Why it's built this way</p>
+      <h2 style="margin-bottom:18px">Three load-bearing decisions</h2>
+      <div class="principles">
+        <div class="principle">
+          <h4>Reuse, never re-implement</h4>
+          <p>The wire protocol is firmware-coupled and evolving. faultycat-lab drives <code>faultycmd</code>'s existing clients so a firmware change never needs a second edit here.</p>
+        </div>
+        <div class="principle">
+          <h4>Depend only on the stable surface</h4>
+          <p><code>faultycmd</code>'s internals moved between 1.x and 3.x. <code>_compat.py</code> imports only from <code>faultycmd.protocols</code> and resolves moved helpers, so an upgrade won't break the package.</p>
+        </div>
+        <div class="principle">
+          <h4>Feature-gate, degrade clearly</h4>
+          <p>Leaner firmware builds lack I2C / UART / logic verbs. Those methods raise a plain "upgrade faultycmd" error instead of an opaque <code>AttributeError</code>.</p>
+        </div>
+      </div>
+      <p class="foot-note">src/faultycat/ · 8 modules · 13 unit tests (no board required) · matplotlib + pandas plotting · plotly optional</p>
+    </div>
+  </footer>
+
+</main>
+
+<script>
+  // ---------------- data ----------------
+  const T = { emfi: "var(--emfi)", crowbar: "var(--crowbar)", scanner: "var(--scanner)", uart: "var(--uart)", core: "var(--ink-faint)" };
+
+  const layers = [
+    { n: "L1", title: "Your notebook", sub: "import faultycat as fc  ·  the code you write in a Jupyter cell", tag: "you", mods: ["__init__.py"] },
+    { n: "L2", title: "faultycat facade", sub: "ergonomics: sessions, engines, attribute config, _repr_html_, plots", tag: "this package", mods: ["session.py", "engines.py", "scanner.py", "uart.py", "plotting.py", "_html.py"] },
+    { n: "L3", title: "faultycmd.protocols", sub: "the transport: CRC framing, wire opcodes, cross-platform USB discovery", tag: "reused", reuse: 1, mods: ["_compat.py"] },
+    { n: "L4", title: "USB CDC composite", sub: "four virtual serial channels over one cable (+ CMSIS-DAP)", tag: "wire", mods: [] },
+    { n: "L5", title: "FaultyCat v3 board", sub: "RP2040 firmware → HV EMFI coil / crowbar MOSFET → your target", tag: "silicon", mods: [] },
+  ];
+
+  const modules = [
+    { file: "__init__.py", tint: "emfi", layer: "L1 · public API",
+      role: "The front door: connect(), the FaultyCat class, enum re-exports and every plot helper.",
+      apis: ["<b>connect()</b> → FaultyCat", "<b>FaultyCat</b> session class", "re-exports <b>EmfiTrigger</b>, <b>CrowbarOutput</b> …", "<b>plot_trace / glitch_map / plot_logic</b>"],
+      code: `<span class="k">import</span> faultycat <span class="k">as</span> fc\ncat = fc.connect()\nfc.EmfiTrigger.EXT_RISING` },
+    { file: "session.py", tint: "emfi", layer: "L2 · lifecycle",
+      role: "Owns the connection. A notebook wants ONE long-lived session holding every CDC open — this is it.",
+      apis: ["<b>connect()</b> discovers + opens all CDCs", "<b>FaultyCat</b>.emfi / .crowbar / .scanner / .uart", "<b>.campaign(engine)</b> → CampaignRunner", "<b>.close()</b> + context manager", "graceful: <b>require=False</b> → empty session"],
+      code: `cat = fc.connect()          <span class="c"># opens 4 CDCs</span>\ncat.emfi          <span class="c"># EmfiEngine or None</span>\n<span class="k">with</span> fc.connect() <span class="k">as</span> cat:\n    ...                     <span class="c"># auto-close</span>` },
+    { file: "engines.py", tint: "emfi", layer: "L2 · fault injection",
+      role: "The EMFI and crowbar engines plus the campaign runner. Configure by attribute, then arm and fire.",
+      apis: ["<b>EmfiEngine</b>: trigger / delay_us / width_us", "<b>.glitch()</b> = apply → arm → fire", "<b>.capture()</b> → numpy ADC trace", "<b>CrowbarEngine</b>: output / width_ns", "<b>CampaignRunner</b>.configure(...).run()"],
+      code: `cat.emfi.trigger = <span class="s">"ext_rising"</span>\ncat.emfi.delay_us = <span class="k">100</span>\ncat.emfi.width_us = <span class="k">10</span>\ncat.emfi.glitch()           <span class="c"># one shot</span>` },
+    { file: "scanner.py", tint: "scanner", layer: "L2 · probing",
+      role: "Typed facade over the scanner shell. Turns raw reply lines into parsed pin/address results; feature-gated across firmware versions.",
+      apis: ["<b>.swd()</b> → SwdScanResult(swclk_gp, swdio_gp)", "<b>.i2c()</b> → I2cScanResult(sda, scl, addresses)", "<b>.i2c_probe(sda, scl)</b> → [addrs]", "<b>.logic(...)</b> → LaCapture (GP0..GP7)"],
+      code: `swd = cat.scanner.swd()\n<span class="k">print</span>(swd.swclk_gp, swd.swdio_gp)\ncap = cat.scanner.logic(interval_us=<span class="k">1</span>)\nfc.plot_logic(cap)` },
+    { file: "uart.py", tint: "uart", layer: "L2 · observe",
+      role: "Target-UART passthrough — closes the attack→observe loop. Control rides the scanner CDC; data flows on its own port.",
+      apis: ["<b>.open(baud=…)</b> enable bridge + open data CDC", "<b>.reset_input()</b> drop pre-glitch chatter", "<b>.write() / .read_until()</b>", "idempotent w.r.t. the firmware bridge"],
+      code: `cat.uart.open(baud=<span class="k">115200</span>)\ncat.uart.reset_input()\ncat.emfi.glitch()\ncat.uart.read_until(<span class="s">b"\\n"</span>, timeout=<span class="k">1</span>)` },
+    { file: "plotting.py", tint: "scanner", layer: "L2 · visuals",
+      role: "The two signature visuals for fault injection, plus logic unpacking. Heavy deps import lazily.",
+      apis: ["<b>plot_trace(cap)</b> — the ADC line", "<b>glitch_map(df)</b> — delay×width, hit/miss", "<b>plot_logic(cap)</b> — stacked GP channels", "<b>results_to_dataframe()</b> + default_success()"],
+      code: `df = camp.results_df()\nfc.glitch_map(df)   <span class="c"># green=hit</span>\n<span class="c"># interactive variant:</span>\nfc.glitch_map_plotly(df)` },
+    { file: "_compat.py", tint: "core", layer: "L3 · bridge",
+      role: "The single import point into faultycmd. Absorbs the 1.x↔3.x layout differences so an upgrade can't break the package.",
+      apis: ["imports only from <b>faultycmd.protocols</b>", "<b>resolve_cdc_for()</b> — 1.x/3.x path tolerant", "<b>has_method()</b> — feature detection", "<b>coerce_enum()</b> — \"ext_rising\" | 1 | enum"],
+      code: `<span class="c"># tolerant across faultycmd versions</span>\n<span class="k">from</span> faultycmd.protocols <span class="k">import</span> (\n    EmfiClient, CampaignClient, ...\n)` },
+    { file: "_html.py", tint: "core", layer: "L2 · Jupyter",
+      role: "Renders the faultycmd status dataclasses as HTML tables in Jupyter — reusing their existing .as_rows(), one source of truth with the CLI.",
+      apis: ["<b>rows_to_html(title, rows)</b>", "<b>status_html(status)</b> via .as_rows()"],
+      code: `cat.emfi.status   <span class="c"># renders a table</span>\n<span class="c"># same fields the CLI prints,</span>\n<span class="c"># straight from .as_rows()</span>` },
+  ];
+
+  const cdcs = [
+    { num: "CDC 0 · IF 0/1", name: "EMFI", tint: "emfi", wire: "binary · CRC16 framing", desc: "Electromagnetic pulse engine. Drives EmfiEngine + EMFI campaigns.", if: "opcodes 0x01, 0x10–0x15" },
+    { num: "CDC 1 · IF 2/3", name: "Crowbar", tint: "crowbar", wire: "binary · CRC16 framing", desc: "Voltage-glitch (crowbar) engine. Drives CrowbarEngine + crowbar campaigns.", if: "opcodes 0x01, 0x10–0x14" },
+    { num: "CDC 2 · IF 4/5", name: "Scanner shell", tint: "scanner", wire: "text shell", desc: "SWD / I2C / logic-analyzer commands — and the UART control verbs.", if: "ScannerEngine + uart control" },
+    { num: "CDC 3 · IF 6/7", name: "Target UART", tint: "uart", wire: "raw serial", desc: "The target's own UART data. Read the response after a glitch lands here.", if: "UartTarget data path" },
+  ];
+
+  const flows = [
+    { key: "shot", label: "Single EMFI shot", tint: "emfi",
+      steps: [
+        { t: "Configure by attribute", d: "Set the trigger source and pulse timing on the engine object.", c: "cat.emfi.trigger = 'ext_rising'" },
+        { t: "Fire in one call", d: "glitch() pushes the config, arms the HV cap, and waits for the trigger to fire.", c: "cat.emfi.glitch()" },
+        { t: "Read the ADC trace", d: "Pull the capture buffer back as a numpy array.", c: "trace = cat.emfi.capture()" },
+        { t: "Plot it", d: "One helper renders the sampled waveform inline.", c: "fc.plot_trace(trace)" },
+      ] },
+    { key: "camp", label: "Campaign → glitch map", tint: "emfi",
+      steps: [
+        { t: "Define the sweep", d: "Each axis is (start, end, step). The firmware executes the grid on-device.", c: "cat.campaign('emfi').configure(delay=(0,200,10), width=(1,50,1))" },
+        { t: "Run with progress", d: "run() streams one result per step, with a tqdm bar in the notebook.", c: "camp.run()" },
+        { t: "Collect a DataFrame", d: "Every step becomes a row, with a boolean success column.", c: "df = camp.results_df()" },
+        { t: "Draw the glitch map", d: "delay × width, green where the target faulted — the classic FI picture.", c: "fc.glitch_map(df)" },
+      ] },
+    { key: "obs", label: "Attack → observe", tint: "uart",
+      steps: [
+        { t: "Open the target UART", d: "Enables the firmware bridge and opens the data CDC.", c: "cat.uart.open(baud=115200)" },
+        { t: "Clear the buffer", d: "Drop any pre-glitch chatter so you read only the post-glitch output.", c: "cat.uart.reset_input()" },
+        { t: "Fire the glitch", d: "The same one-shot call as before.", c: "cat.emfi.glitch()" },
+        { t: "Read the response", d: "See if a protected routine spilled a prompt or skipped its check.", c: "cat.uart.read_until(b'\\n', timeout=1.0)" },
+      ] },
+  ];
+
+  // ---------------- render: chain ----------------
+  const stack = document.getElementById("chainStack");
+  layers.forEach((L, i) => {
+    const b = document.createElement("button");
+    b.className = "layer";
+    b.dataset.i = i;
+    if (L.reuse) b.dataset.reuse = "1";
+    b.innerHTML = `<span class="lnum">${L.n}</span>
+      <span><span class="ltitle">${L.title}</span><br><span class="lsub">${L.sub}</span></span>
+      <span class="ltag">${L.tag}</span>`;
+    b.addEventListener("click", () => selectLayer(i));
+    stack.appendChild(b);
+  });
+  function selectLayer(i) {
+    [...stack.children].forEach((c, j) => c.classList.toggle("active", j === i));
+    const mods = layers[i].mods;
+    // highlight matching module cards
+    document.querySelectorAll(".mcard").forEach(card => {
+      const on = mods.includes(card.dataset.file);
+      card.style.opacity = (mods.length && !on) ? .38 : 1;
+    });
+  }
+
+  // ---------------- render: modules ----------------
+  const grid = document.getElementById("modGrid");
+  const detail = document.getElementById("detail");
+  modules.forEach((m, i) => {
+    const b = document.createElement("button");
+    b.className = "mcard";
+    b.dataset.file = m.file;
+    b.style.setProperty("--tint", T[m.tint]);
+    b.innerHTML = `<span class="mlayer">${m.layer}</span>
+      <span class="mname">${m.file}</span>
+      <span class="mrole">${m.role.split(".")[0]}.</span>`;
+    b.addEventListener("click", () => showModule(i));
+    grid.appendChild(b);
+  });
+  function showModule(i) {
+    const m = modules[i];
+    document.querySelectorAll(".mcard").forEach(c => c.classList.toggle("active", c.dataset.file === m.file));
+    detail.style.setProperty("--tint", T[m.tint]);
+    detail.innerHTML = `
+      <div class="detail-head">
+        <div class="dfile">${m.file}</div>
+        <div class="drole">${m.role}</div>
+      </div>
+      <div class="detail-body">
+        <h4>Key surface</h4>
+        <ul class="apis">${m.apis.map(a => `<li>${a}</li>`).join("")}</ul>
+        <h4>In a cell</h4>
+        <pre>${m.code}</pre>
+      </div>`;
+  }
+  showModule(0);
+
+  // ---------------- render: cdc ----------------
+  const strip = document.getElementById("cdcStrip");
+  cdcs.forEach(c => {
+    const d = document.createElement("div");
+    d.className = "cdc";
+    d.style.setProperty("--tint", T[c.tint]);
+    d.innerHTML = `<span class="cnum">${c.num}</span>
+      <span class="cname">${c.name}</span>
+      <span class="cwire">${c.wire}</span>
+      <span class="cdesc">${c.desc}</span>
+      <span class="cif">${c.if}</span>`;
+    strip.appendChild(d);
+  });
+
+  // ---------------- render: flows ----------------
+  const tabs = document.getElementById("flowTabs");
+  const panels = document.getElementById("flowPanels");
+  flows.forEach((f, i) => {
+    const t = document.createElement("button");
+    t.className = "tab" + (i === 0 ? " active" : "");
+    t.style.setProperty("--tint", T[f.tint]);
+    t.textContent = f.label;
+    t.addEventListener("click", () => selectFlow(i));
+    tabs.appendChild(t);
+
+    const p = document.createElement("div");
+    p.className = "flow" + (i === 0 ? " active" : "");
+    p.style.setProperty("--tint", T[f.tint]);
+    p.dataset.i = i;
+    const steps = f.steps.map(s => `
+      <div class="step">
+        <span class="snum"></span>
+        <span><span class="stitle">${s.t}</span><br><span class="sdesc">${s.d}</span>
+        <div class="scall">${s.c.replace(/</g,"&lt;")}</div></span>
+      </div>`).join("");
+    const codeAll = f.steps.map(s => s.c).join("\n").replace(/</g,"&lt;");
+    p.innerHTML = `<div class="steps">${steps}</div>
+      <div><h4 style="font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 8px">The whole cell</h4><pre>${codeAll}</pre></div>`;
+    panels.appendChild(p);
+  });
+  function selectFlow(i) {
+    [...tabs.children].forEach((t, j) => t.classList.toggle("active", j === i));
+    [...panels.children].forEach((p, j) => p.classList.toggle("active", j === i));
+  }
+
+  // ---------------- trace animation ----------------
+  const traceBtn = document.getElementById("traceBtn");
+  const traceHint = document.getElementById("traceHint");
+  const captions = [
+    "L1 — you call cat.emfi.glitch()",
+    "L2 — EmfiEngine coerces settings, calls the client",
+    "L3 — the frame is CRC-wrapped and written",
+    "L4 — bytes cross CDC 0 to the board",
+    "L5 — the RP2040 charges HV and fires the pulse ⚡",
+  ];
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let running = false;
+  traceBtn.addEventListener("click", () => {
+    if (running) return;
+    running = true;
+    const rows = [...stack.children];
+    rows.forEach(r => r.classList.remove("active"));
+    let i = 0;
+    const step = () => {
+      if (i > 0) rows[i - 1].classList.remove("pulse");
+      if (i >= rows.length) {
+        traceHint.textContent = "Pulse delivered. The same path carries every call.";
+        running = false;
+        return;
+      }
+      rows[i].classList.add("pulse");
+      rows[i].scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
+      traceHint.textContent = captions[i];
+      i++;
+      setTimeout(step, reduce ? 350 : 720);
+    };
+    step();
+  });
+
+  // ---------------- theme toggle ----------------
+  const root = document.documentElement;
+  document.getElementById("themeToggle").addEventListener("click", () => {
+    const cur = root.getAttribute("data-theme");
+    const isDark = cur ? cur === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+    root.setAttribute("data-theme", isDark ? "light" : "dark");
+  });
+</script>
