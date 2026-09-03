@@ -34,7 +34,9 @@ class UartTarget:
     ``data_port`` overrides auto-discovery of the data CDC.
     """
 
-    def __init__(self, control: ScannerClient, data_port: str | None = None, serial_factory=None) -> None:
+    def __init__(
+        self, control: ScannerClient, data_port: str | None = None, serial_factory=None
+    ) -> None:
         self._control = control
         self._data_port = data_port
         self._factory = serial_factory  # inject a fake data CDC (simulator)
@@ -126,7 +128,9 @@ class UartTarget:
         ser = self._ser_or_raise()
         return ser.read(ser.in_waiting or 1)
 
-    def read_until(self, expected: bytes = b"\n", *, timeout: float | None = None) -> bytes:
+    def read_until(
+        self, expected: bytes = b"\n", *, timeout: float | None = None
+    ) -> bytes:
         """Read until ``expected`` is seen or the read timeout elapses.
 
         ``timeout`` temporarily overrides the port timeout for this call.

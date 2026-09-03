@@ -60,8 +60,12 @@ class EmfiEngine:
         """Push the current attribute settings to the firmware."""
         trig = coerce_enum(self.trigger, EmfiTrigger, field="trigger")
         if int(self.repeat) <= 1:
-            self._c.configure(trig, int(self.delay_us), int(self.width_us),
-                              int(self.charge_timeout_ms))
+            self._c.configure(
+                trig,
+                int(self.delay_us),
+                int(self.width_us),
+                int(self.charge_timeout_ms),
+            )
             return
         # Extended CONFIGURE carrying repeat (5th u32). Firmware without
         # multipulse support ignores it / rejects the longer frame.
@@ -70,8 +74,11 @@ class EmfiEngine:
         from faultycmd.protocols.emfi import CMD_CONFIGURE  # noqa: PLC0415
 
         payload = bytes([trig]) + struct.pack(
-            "<IIII", int(self.delay_us), int(self.width_us),
-            int(self.charge_timeout_ms), int(self.repeat)
+            "<IIII",
+            int(self.delay_us),
+            int(self.width_us),
+            int(self.charge_timeout_ms),
+            int(self.repeat),
         )
         self._c._raise_on_err(self._c._send(CMD_CONFIGURE, payload))
 
@@ -340,7 +347,9 @@ class CampaignRunner:
         return rows_to_html("campaign", rows)
 
 
-def iter_campaign(client: CampaignClient, every_ms: int = 200) -> Iterator[CampaignResult]:
+def iter_campaign(
+    client: CampaignClient, every_ms: int = 200
+) -> Iterator[CampaignResult]:
     """Low-level generator: start a configured campaign and yield each
     result as it arrives. For callers who want to stream rather than
     collect."""

@@ -69,7 +69,9 @@ class FaultyCat:
             )
         else:
             check = not self._allow_version_mismatch
-            client = CampaignClient.discover(engine=engine, check_firmware_version=check)
+            client = CampaignClient.discover(
+                engine=engine, check_firmware_version=check
+            )
         client.open()
         self._open_clients.append(client)
         return CampaignRunner(client)
@@ -86,7 +88,9 @@ class FaultyCat:
         nRST (a plain GPIO pulse; no SWD needed).
         """
         if self.scanner is None:
-            raise RuntimeError("target_reset needs the scanner CDC (connect with scanner=True)")
+            raise RuntimeError(
+                "target_reset needs the scanner CDC (connect with scanner=True)"
+            )
         line = self.scanner.client.send_line(
             f"reset {int(gp)} {int(ms)}", accept_prefixes=("RESET:", "SHELL:")
         )
@@ -121,13 +125,19 @@ class FaultyCat:
         self.close()
 
     def __repr__(self) -> str:
-        present = [n for n in ("emfi", "crowbar", "scanner", "uart") if getattr(self, n) is not None]
+        present = [
+            n
+            for n in ("emfi", "crowbar", "scanner", "uart")
+            if getattr(self, n) is not None
+        ]
         return f"FaultyCat(connected={present or 'none'})"
 
     def _repr_html_(self) -> str:
         rows = []
         for name in ("emfi", "crowbar", "scanner", "uart"):
-            rows.append((name, "✓ ready" if getattr(self, name) is not None else "— absent"))
+            rows.append(
+                (name, "✓ ready" if getattr(self, name) is not None else "— absent")
+            )
         from ._html import rows_to_html
 
         return rows_to_html("FaultyCat session", rows)
@@ -184,14 +194,26 @@ def connect(
     errors: dict[str, Exception] = {}
 
     emfi = _open(EmfiClient, emfi_port, check, opened, errors, "emfi", serial_factory)
-    crowbar = _open(CrowbarClient, crowbar_port, check, opened, errors, "crowbar", serial_factory)
+    crowbar = _open(
+        CrowbarClient, crowbar_port, check, opened, errors, "crowbar", serial_factory
+    )
 
     scan_client = None
     if scanner:
-        scan_client = _open(ScannerClient, scanner_port, check, opened, errors, "scanner", serial_factory)
+        scan_client = _open(
+            ScannerClient,
+            scanner_port,
+            check,
+            opened,
+            errors,
+            "scanner",
+            serial_factory,
+        )
 
     if require and not opened:
-        detail = "; ".join(f"{k}: {v}" for k, v in errors.items()) or "no FaultyCat found"
+        detail = (
+            "; ".join(f"{k}: {v}" for k, v in errors.items()) or "no FaultyCat found"
+        )
         raise ConnectionError(f"could not open any FaultyCat CDC ({detail})")
 
     # The target UART reuses the scanner client for its control shell and

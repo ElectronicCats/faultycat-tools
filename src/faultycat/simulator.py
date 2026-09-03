@@ -45,7 +45,9 @@ def _crc16(data: bytes) -> int:
     for b in data:
         crc ^= b << 8
         for _ in range(8):
-            crc = ((crc << 1) ^ 0x1021) & 0xFFFF if crc & 0x8000 else (crc << 1) & 0xFFFF
+            crc = (
+                ((crc << 1) ^ 0x1021) & 0xFFFF if crc & 0x8000 else (crc << 1) & 0xFFFF
+            )
     return crc
 
 
@@ -124,7 +126,9 @@ class EmfiSim(_FrameSim):
             self.state = 0
             return b"\x00"
         if cmd == 0x14:  # STATUS: state,err + 4xu32
-            return bytes([self.state, 0]) + struct.pack("<IIII", 12345, 512, self.width, self.delay)
+            return bytes([self.state, 0]) + struct.pack(
+                "<IIII", 12345, 512, self.width, self.delay
+            )
         if cmd == 0x15:  # CAPTURE: return a synthetic ADC trace
             off, length = struct.unpack("<HH", payload[:4])
             return _synthetic_trace(off, length)
@@ -145,7 +149,9 @@ class CrowbarSim(_FrameSim):
         if cmd == 0x01:
             return b"F5\x00\x00"
         if cmd == 0x10:  # CONFIGURE: trigger, output, delay, width_ns
-            _trig, self.output, self.delay, self.width_ns = struct.unpack("<BBII", payload[:10])
+            _trig, self.output, self.delay, self.width_ns = struct.unpack(
+                "<BBII", payload[:10]
+            )
             return b"\x00"
         if cmd == 0x11:
             self.state = 2
@@ -157,7 +163,11 @@ class CrowbarSim(_FrameSim):
             self.state = 0
             return b"\x00"
         if cmd == 0x14:  # STATUS: state,err + 3xu32 + output byte (15 B)
-            return bytes([self.state, 0]) + struct.pack("<III", 6789, self.width_ns, self.delay) + bytes([self.output])
+            return (
+                bytes([self.state, 0])
+                + struct.pack("<III", 6789, self.width_ns, self.delay)
+                + bytes([self.output])
+            )
         return b"\x00"
 
 
@@ -197,9 +207,8 @@ class CampaignSim(_FrameSim):
             if not self.queue and self.state == 2:
                 self.state = 3  # DONE
             step_n = self.total - len(self.queue)
-            return (
-                bytes([self.state, 0, 0, 0])
-                + struct.pack("<4I", step_n, self.total, step_n, 0)
+            return bytes([self.state, 0, 0, 0]) + struct.pack(
+                "<4I", step_n, self.total, step_n, 0
             )
         if cmd == 0x24:  # DRAIN: request 1 byte max_count -> [n][records..]
             max_count = payload[0] if payload else 1
@@ -268,7 +277,11 @@ class ScannerSim:
         if line.startswith("scan swd"):
             return ["SCAN: swd MATCH swclk=GP2 swdio=GP3", "SCAN:   dpidr=0x0bc11477"]
         if line.startswith("scan i2c"):
-            return ["SCAN: i2c MATCH sda=GP0 scl=GP1 found=2", "SCAN:   addr=0x3C", "SCAN:   addr=0x50"]
+            return [
+                "SCAN: i2c MATCH sda=GP0 scl=GP1 found=2",
+                "SCAN:   addr=0x3C",
+                "SCAN:   addr=0x50",
+            ]
         if line.startswith("i2c probe"):
             return ["I2C: OK probe sda=GP0 scl=GP1", "I2C:   addr=0x3C"]
         if line.startswith("reset"):
@@ -282,7 +295,13 @@ class ScannerSim:
             self._uart_on = False
             return ["UART: OK disabled"]
         if line.startswith("uart status"):
-            return ["UART: enabled baud=115200 parity=n stop=1" if self._uart_on else "UART: disabled"]
+            return [
+                (
+                    "UART: enabled baud=115200 parity=n stop=1"
+                    if self._uart_on
+                    else "UART: disabled"
+                )
+            ]
         if line.startswith("uart"):
             return ["UART: OK"]
         return []

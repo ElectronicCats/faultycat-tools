@@ -50,7 +50,11 @@ from .uart import UartTarget
 
 def _read_version() -> str:
     try:
-        return (Path(__file__).resolve().parent.parent.parent / "VERSION").read_text().strip()
+        return (
+            (Path(__file__).resolve().parent.parent.parent / "VERSION")
+            .read_text()
+            .strip()
+        )
     except OSError:
         return "0.0.0"
 

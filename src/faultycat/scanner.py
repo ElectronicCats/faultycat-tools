@@ -85,7 +85,9 @@ class ScannerEngine:
         on_progress: Callable[[str], None] | None = None,
     ) -> SwdScanResult:
         """Scan for the target's SWD pinout (SWCLK/SWDIO)."""
-        lines = self._c.scan_swd(targetsel_hex=targetsel_hex, timeout_s=timeout_s, on_progress=on_progress)
+        lines = self._c.scan_swd(
+            targetsel_hex=targetsel_hex, timeout_s=timeout_s, on_progress=on_progress
+        )
         parsed = parse_scan_swd_match(lines)
         if parsed is None:
             return SwdScanResult(matched=False, lines=lines)
@@ -107,7 +109,9 @@ class ScannerEngine:
         if parsed is None:
             return I2cScanResult(matched=False, lines=lines)
         sda, scl, addrs = parsed
-        return I2cScanResult(matched=True, sda_gp=sda, scl_gp=scl, addresses=addrs, lines=lines)
+        return I2cScanResult(
+            matched=True, sda_gp=sda, scl_gp=scl, addresses=addrs, lines=lines
+        )
 
     def i2c_probe(self, sda: int, scl: int, timeout_s: float = 5.0) -> list[int]:
         """Rescan known SDA/SCL pins; return the list of ACKed addresses."""
@@ -150,7 +154,11 @@ class ScannerEngine:
             )
 
     def __repr__(self) -> str:
-        caps = [m for m in ("scan_swd", "scan_i2c", "i2c_probe", "la", "uart_enter") if has_method(self._c, m)]
+        caps = [
+            m
+            for m in ("scan_swd", "scan_i2c", "i2c_probe", "la", "uart_enter")
+            if has_method(self._c, m)
+        ]
         return f"ScannerEngine(capabilities={caps})"
 
     def _repr_html_(self) -> str:

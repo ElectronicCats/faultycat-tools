@@ -130,4 +130,6 @@ def coerce_enum(value: object, enum_cls: type, *, field: str) -> int:
             return int(members[key])
         valid = ", ".join(m.lower() for m in members)
         raise ValueError(f"unknown {field} {value!r}; expected one of: {valid}")
-    raise TypeError(f"{field} must be a str, int, or {enum_cls.__name__}, got {type(value).__name__}")
+    raise TypeError(
+        f"{field} must be a str, int, or {enum_cls.__name__}, got {type(value).__name__}"
+    )

@@ -41,7 +41,9 @@ class GlitchController:
         """Set the values swept for ``parameter`` (any iterable: a
         ``range``, a list, ...). Returns self so calls chain."""
         if parameter not in self.parameters:
-            raise KeyError(f"unknown parameter {parameter!r}; declared: {self.parameters}")
+            raise KeyError(
+                f"unknown parameter {parameter!r}; declared: {self.parameters}"
+            )
         self._ranges[parameter] = list(values)
         return self
 
@@ -78,7 +80,9 @@ class GlitchController:
         from .plotting import glitch_map  # noqa: PLC0415
 
         x = x or self.parameters[0]
-        y = y or (self.parameters[1] if len(self.parameters) > 1 else self.parameters[0])
+        y = y or (
+            self.parameters[1] if len(self.parameters) > 1 else self.parameters[0]
+        )
         return glitch_map(self.results_df(), "group", x=x, y=y, **kw)
 
     def __len__(self) -> int:

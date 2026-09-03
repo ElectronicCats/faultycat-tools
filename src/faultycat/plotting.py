@@ -57,7 +57,11 @@ def plot_trace(trace: Sequence[int] | bytes, *, ax=None, title: str = "EMFI capt
     import matplotlib.pyplot as plt  # noqa: PLC0415 — optional [notebook] dep
     import numpy as np  # noqa: PLC0415
 
-    y = np.frombuffer(trace, dtype=np.uint8) if isinstance(trace, (bytes, bytearray)) else np.asarray(trace)
+    y = (
+        np.frombuffer(trace, dtype=np.uint8)
+        if isinstance(trace, (bytes, bytearray))
+        else np.asarray(trace)
+    )
     if ax is None:
         _fig, ax = plt.subplots(figsize=(9, 3))
     ax.plot(y, linewidth=0.8)
@@ -69,8 +73,13 @@ def plot_trace(trace: Sequence[int] | bytes, *, ax=None, title: str = "EMFI capt
 
 
 # Known outcome-group colours; anything else cycles through _CYCLE.
-_GROUP_COLORS = {"success": "#2ca02c", "hit": "#2ca02c", "reset": "#d62728",
-                 "normal": "#c9c9c9", "no effect": "#c9c9c9"}
+_GROUP_COLORS = {
+    "success": "#2ca02c",
+    "hit": "#2ca02c",
+    "reset": "#d62728",
+    "normal": "#c9c9c9",
+    "no effect": "#c9c9c9",
+}
 _CYCLE = ["#1f77b4", "#ff7f0e", "#9467bd", "#8c564b", "#e377c2", "#17becf"]
 # Draw order: greys first (bottom), successes last (on top). Others middle.
 _RANK = {"no effect": 0, "normal": 0, "reset": 1, "hit": 2, "success": 2}
@@ -130,7 +139,9 @@ def logic_channels(capture: Any):
     return np.array([(buf >> c) & 1 for c in range(8)], dtype=np.uint8)
 
 
-def plot_logic(capture: Any, channels: Sequence[int] | None = None, *, title: str = "Logic capture"):
+def plot_logic(
+    capture: Any, channels: Sequence[int] | None = None, *, title: str = "Logic capture"
+):
     """Step-plot logic-analyzer channels stacked vertically (like a
     scope/PulseView). x-axis is time in microseconds."""
     import matplotlib.pyplot as plt  # noqa: PLC0415 — optional [notebook] dep
@@ -140,7 +151,9 @@ def plot_logic(capture: Any, channels: Sequence[int] | None = None, *, title: st
     interval = getattr(capture, "interval_us", 1)
     chans = list(channels) if channels is not None else list(range(8))
     t = np.arange(bits.shape[1]) * interval
-    fig, axes = plt.subplots(len(chans), 1, sharex=True, figsize=(9, 0.6 * len(chans) + 1))
+    fig, axes = plt.subplots(
+        len(chans), 1, sharex=True, figsize=(9, 0.6 * len(chans) + 1)
+    )
     if len(chans) == 1:
         axes = [axes]
     for ax, c in zip(axes, chans):
