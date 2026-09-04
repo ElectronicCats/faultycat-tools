@@ -273,7 +273,7 @@ class ScannerSim:
 
     def _respond(self, line: str) -> list[str]:
         if line == "version":
-            return ["SHELL: VERSION 1.0.2.0"]
+            return ["SHELL: VERSION 1.0.3.0"]
         if line.startswith("scan swd"):
             return ["SCAN: swd MATCH swclk=GP2 swdio=GP3", "SCAN:   dpidr=0x0bc11477"]
         if line.startswith("scan i2c"):
