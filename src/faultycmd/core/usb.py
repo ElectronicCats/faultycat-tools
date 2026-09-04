@@ -85,17 +85,22 @@ class PortDiscoveryError(LookupError):
 # Windows hwid carries the interface number as "MI_XX" (hex).
 _WIN_MI_RE = re.compile(r"MI_([0-9A-Fa-f]{2})")
 
-# pyserial's `location` field carries the interface number as the
-# last ".<n>" segment:
-#   Linux:   "1-3:1.4"   → 4
-#   Windows: "1-3:x.6"   → 6  (yes, literal 'x' — config index is
-#                              unknown on Windows so pyserial fills it
-#                              with that placeholder)
-# Older pyserial on macOS used to emit a similar ".N" suffix but newer
-# versions (and current macOS) just give the bus topology — e.g.
-# `20-2` — without any interface marker. The macOS-specific fallbacks
-# below pick up that case.
-_LOCATION_IFACE_RE = re.compile(r"\.(\d+)\s*$")
+# pyserial's `location` carries the interface number only in the
+# Linux/Windows `bus:config.iface` form, where the interface is the
+# trailing `.<n>` AFTER the `:` config segment:
+#   Linux:   "1-3:1.4"   -> 4
+#   Windows: "1-3:x.6"   -> 6  (literal 'x' — the config index is
+#                               unknown on Windows so pyserial fills it
+#                               with that placeholder)
+# macOS has NO such segment: pyserial renders the device-level USB
+# topology (e.g. "20-2", or "2-1.2" one hub level deep) with no colon,
+# and its trailing `.N` is a hub-port nibble, NOT an interface number —
+# and it is shared verbatim by every CDC of the composite. Anchoring on
+# the `:` keeps this Linux/Windows-only so macOS falls through to the
+# device-name / iInterface fallbacks below (which are per-port correct).
+# Without the anchor, a hubbed macOS board reads `2-1.2` as interface 2
+# and every CDC collapses onto crowbar.
+_LOCATION_IFACE_RE = re.compile(r":\w+\.(\d+)\s*$")
 
 # pyserial may surface the firmware's iInterface descriptor string in
 # ``port.interface``. Our firmware sets one per CDC (see
@@ -127,14 +132,17 @@ def _interface_from_port(port) -> int | None:
       2. ``LOCATION=bus:x.N`` embedded inside ``hwid`` (Windows — when
          ``port.location`` is ``None`` but pyserial still encodes the
          location token inside the normalised hwid string).
-      3. Trailing ``.<n>`` in ``location`` (Linux + some pyserial
-         versions on macOS).
+      3. ``:<config>.<iface>`` tail of ``location`` (Linux + Windows;
+         the leading ``:`` is required so macOS topology strings like
+         ``2-1.2`` are NOT misread as interface numbers).
       4. ``udevadm info`` for ``ID_USB_INTERFACE_NUM`` (Linux fallback).
-      5. iInterface string in ``port.interface`` matches one of the
-         firmware's CDC descriptors (macOS-friendly; works anywhere
-         pyserial populates the field).
-      6. Trailing digit of ``/dev/cu.usbmodem<...><N>`` device name
-         (macOS — `N` is the **data** interface, control = `N` - 1).
+      5. Trailing digit of ``/dev/cu.usbmodem<...><N>`` device name
+         (macOS — `N` is the **data** interface, control = `N` - 1;
+         distinct per CDC, so preferred over the shared iInterface
+         string below).
+      6. iInterface string in ``port.interface`` matches one of the
+         firmware's CDC descriptors (last-resort; on macOS pyserial may
+         repeat interface 0's string across all CDCs).
     """
     hwid = port.hwid or ""
     m = _WIN_MI_RE.search(hwid)
@@ -168,18 +176,23 @@ def _interface_from_port(port) -> int | None:
         except (subprocess.CalledProcessError, OSError):
             pass
 
-    iface_str = (getattr(port, "interface", None) or "").strip()
-    if iface_str in _INTERFACE_BY_STRING:
-        return _INTERFACE_BY_STRING[iface_str]
-
+    # macOS: `/dev/cu.usbmodem<...><N>` encodes the DATA interface as its
+    # trailing digit and is DISTINCT per CDC. Prefer it over the
+    # iInterface string below: on macOS pyserial derives `port.interface`
+    # from the shared device-level locationID, so that string can repeat
+    # across all four interfaces (or be absent) — the device name never
+    # does. Data interface = control + 1; clamp at 0 so a hypothetical
+    # data-IF 0 (shouldn't happen — CDC always has the control pair)
+    # doesn't underflow.
     device = port.device or ""
     m = _MACOS_USBMODEM_RE.search(device)
     if m:
         data_iface = int(m.group(1))
-        # Data interface = control + 1. Clamp at 0 so a hypothetical
-        # data-IF 0 (shouldn't happen — CDC always has the control
-        # pair) doesn't underflow.
         return max(0, data_iface - 1)
+
+    iface_str = (getattr(port, "interface", None) or "").strip()
+    if iface_str in _INTERFACE_BY_STRING:
+        return _INTERFACE_BY_STRING[iface_str]
 
     return None
 

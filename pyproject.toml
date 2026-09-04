@@ -41,9 +41,24 @@ dev = [
     "pytest-cov>=4.0",
     "ruff>=0.1",
     "pre-commit>=3.0",
+    "nbmake>=1.4",
 ]
 build-binary = [
     "pyinstaller>=6.0",
+]
+# `import faultycat as fc` notebook layer (src/faultycat). Kept optional so a
+# headless/CLI install of faultycmd stays lean.
+notebook = [
+    "numpy>=1.23",
+    "pandas>=1.5",
+    "matplotlib>=3.6",
+    "tqdm>=4.64",
+    "ipython>=8.0",
+    "ipywidgets>=8.0",
+]
+# Optional interactive glitch-map (hover/zoom). Not required.
+interactive = [
+    "plotly>=5.10",
 ]
 
 [project.scripts]
@@ -64,7 +79,7 @@ path = "VERSION"
 pattern = "(?P<version>.+)"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/faultycmd"]
+packages = ["src/faultycmd", "src/faultycat"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -85,4 +100,4 @@ ignore = ["E501"]   # line-length is enforced via formatter
 # the hook runs from a different cwd than expected. Declaring it
 # explicitly keeps imports stable across ruff versions and across
 # local/CI invocations.
-known-first-party = ["faultycmd"]
+known-first-party = ["faultycmd", "faultycat"]
