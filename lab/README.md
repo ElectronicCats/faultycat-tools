@@ -11,7 +11,7 @@ maps.
 > [!IMPORTANT]
 > This package is a thin **ergonomics layer**. The wire protocol,
 > CRC framing, and cross-platform USB discovery all live in
-> [`faultycmd`](https://github.com/ElectronicCats/faultycat-TUI) (the
+> [`faultycmd`](https://github.com/ElectronicCats/faultycat-tools) (the
 > host CLI/TUI), which this package **reuses**. There is exactly one
 > source of truth for the FaultyCat protocol — this package never
 > re-implements it.
@@ -19,12 +19,12 @@ maps.
 ## Install
 
 The notebook layer ships inside the
-[`faultycat-TUI`](https://github.com/ElectronicCats/faultycat-TUI) repo as the
+[`faultycat-tools`](https://github.com/ElectronicCats/faultycat-tools) repo as the
 `faultycat` package. A per-project `.venv` is the recommended setup — isolated,
 reproducible, and **auto-detected by VS Code**.
 
 ```bash
-git clone https://github.com/ElectronicCats/faultycat-TUI && cd faultycat-TUI
+git clone https://github.com/ElectronicCats/faultycat-tools && cd faultycat-tools
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[notebook]"     # faultycmd transport + faultycat + numpy/pandas/matplotlib/tqdm
 pip install ipykernel            # Jupyter kernel for editors / Jupyter Lab
@@ -35,7 +35,7 @@ One editable install gives you both the `faultycmd` transport and the
 (`.[notebook,interactive]`) for the optional Plotly glitch map.
 
 **In VS Code:**
-1. Open the `faultycat-TUI` folder (`File → Open Folder`).
+1. Open the `faultycat-tools` folder (`File → Open Folder`).
 2. `Ctrl+Shift+P` → **Python: Select Interpreter** → pick `./.venv/bin/python`.
 3. Open any notebook under `lab/notebooks/` and set its **kernel** to that
    `.venv` interpreter. Cells then run against the board and plots render
@@ -110,7 +110,7 @@ own ChipWhisperer-style example notebooks.
 
 ## Status
 
-Alpha (`0.1.0`). Implemented and unit-tested (recording stubs, no board
+Implemented and unit-tested (recording stubs, no board
 required):
 
 - EMFI / crowbar single-shot + campaign sweep facade
@@ -121,5 +121,5 @@ required):
 - Plotting: `plot_trace`, `glitch_map` (+plotly), `plot_logic`
 - Graceful hardware-less discovery (`connect(require=False)`)
 
-Shipped as the `faultycat` package inside the `faultycat-TUI` repo, reusing
+Shipped as the `faultycat` package inside the `faultycat-tools` repo, reusing
 `faultycmd` for the transport.

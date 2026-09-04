@@ -14,11 +14,11 @@ pip install -e ".[notebook,dev]"
 > **faultycmd version matters.** The transport comes from `faultycmd`.
 > A *minimal* faultycmd only exposes EMFI / crowbar / campaign / SWD; the
 > **full** feature set (I2C, target-UART, logic-analyzer) needs the
-> faultycmd from the [`faultycat-TUI`](https://github.com/ElectronicCats/faultycat-TUI)
+> faultycmd from the [`faultycat-tools`](https://github.com/ElectronicCats/faultycat-tools)
 > repo. Install it alongside to unlock everything:
 >
 > ```bash
-> pip install -e ../faultycat-TUI      # richer faultycmd (1.x)
+> pip install -e ../faultycat-tools      # richer faultycmd (1.x)
 > ```
 >
 > The package feature-gates cleanly either way: calls that need a missing

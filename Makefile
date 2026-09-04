@@ -7,7 +7,7 @@ PIP=pip
 .PHONY: install compile-install uninstall clean help
 
 help:
-	@echo "faultycat-TUI Makefile"
+	@echo "faultycat-tools Makefile"
 	@echo "Usage:"
 	@echo "  make install         Install faultycmd as a python package (pip install -e .)"
 	@echo "  make compile-install Compile with PyInstaller and install the binary globally"

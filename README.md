@@ -16,13 +16,13 @@ maintained by Electronic Cats / PWNLab.
 ## Installation
 
 Packaged installers (`.deb`, `.pkg.tar.zst`, macOS `.pkg`, Windows `.exe`)
-are published on the [releases page](https://github.com/ElectronicCats/faultycat-TUI/releases).
+are published on the [releases page](https://github.com/ElectronicCats/faultycat-tools/releases).
 
 To install from source:
 
 ```bash
-git clone https://github.com/ElectronicCats/faultycat-TUI.git
-cd faultycat-TUI
+git clone https://github.com/ElectronicCats/faultycat-tools.git
+cd faultycat-tools
 python3 -m venv venv && source venv/bin/activate
 make install   # equivalent to: pip install -e .
 ```
@@ -83,7 +83,7 @@ https://github.com/ElectronicCats/FaultyCat
 
 Please read the document  [**Contribution Manual**](https://github.com/ElectronicCats/electroniccats-cla/blob/main/electroniccats-contribution-manual.md)  which will show you how to contribute your changes to the project.
 
-✨ Thanks to all our [contributors](https://github.com/ElectronicCats/faultycat-TUI/graphs/contributors)! ✨
+✨ Thanks to all our [contributors](https://github.com/ElectronicCats/faultycat-tools/graphs/contributors)! ✨
 
 See [**_Electronic Cats CLA_**](https://github.com/ElectronicCats/electroniccats-cla/blob/main/electroniccats-cla.md) for more information.
 

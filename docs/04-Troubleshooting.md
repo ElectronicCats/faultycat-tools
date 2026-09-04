@@ -129,7 +129,7 @@ close and reopen all CDCs rather than restarting the TUI.
   [WINDOWS_SUMP_DTR_ISSUE.md](WINDOWS_SUMP_DTR_ISSUE.md) for the two
   documented edge cases in this repo.
 - File an issue at
-  [github.com/ElectronicCats/faultycat-TUI/issues](https://github.com/ElectronicCats/faultycat-TUI/issues)
+  [github.com/ElectronicCats/faultycat-tools/issues](https://github.com/ElectronicCats/faultycat-tools/issues)
   with the `faultycmd devices` and `faultycmd verify` output attached.
   Firmware-side bugs (not host-tool bugs) belong in
   [`faultycat-firmware`](https://github.com/ElectronicCats/faultycat-firmware/issues)
