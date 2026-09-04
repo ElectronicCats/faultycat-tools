@@ -51,9 +51,14 @@ class StubClient:
 
 # -- coerce_enum ----------------------------------------------------------
 
+
 def test_coerce_enum_accepts_string_int_and_member():
-    assert coerce_enum("ext_rising", EmfiTrigger, field="t") == int(EmfiTrigger.EXT_RISING)
-    assert coerce_enum("EXT-RISING", EmfiTrigger, field="t") == int(EmfiTrigger.EXT_RISING)
+    assert coerce_enum("ext_rising", EmfiTrigger, field="t") == int(
+        EmfiTrigger.EXT_RISING
+    )
+    assert coerce_enum("EXT-RISING", EmfiTrigger, field="t") == int(
+        EmfiTrigger.EXT_RISING
+    )
     assert coerce_enum(EmfiTrigger.IMMEDIATE, EmfiTrigger, field="t") == 0
     assert coerce_enum(3, EmfiTrigger, field="t") == 3
 
@@ -66,6 +71,7 @@ def test_coerce_enum_rejects_bad_name_and_bool():
 
 
 # -- EmfiEngine wiring ----------------------------------------------------
+
 
 def test_emfi_glitch_sequence_and_coercion():
     stub = StubClient()
@@ -102,6 +108,7 @@ def test_emfi_repr_html_renders():
 
 # -- discovery degrades gracefully ---------------------------------------
 
+
 def test_connect_without_hardware_returns_empty_session():
     # Force the discovery-failure path with bogus ports so the test is
     # deterministic whether or not a real board is plugged into the CI/dev
@@ -122,6 +129,7 @@ def test_connect_without_hardware_returns_empty_session():
 # -- plotting data path (needs the [notebook] extra) ---------------------
 
 # -- ScannerEngine --------------------------------------------------------
+
 
 class StubScanner:
     """A scanner client exposing only SWD (like older faultycmd)."""
@@ -157,6 +165,7 @@ def test_scanner_i2c_feature_gated():
 
 # -- UartTarget -----------------------------------------------------------
 
+
 class StubControl:
     def __init__(self, has_uart=True):
         self._has_uart = has_uart
@@ -184,6 +193,7 @@ def test_uart_feature_gated_when_control_lacks_bridge():
 
 # -- logic analyzer -------------------------------------------------------
 
+
 def test_logic_channels_unpacks_bits():
     pytest.importorskip("numpy")
     from faultycat import logic_channels
@@ -196,6 +206,7 @@ def test_logic_channels_unpacks_bits():
 
 
 # -- simulator (no hardware, full round-trip) -----------------------------
+
 
 def test_simulator_emfi_and_campaign():
     cat = fc.connect(simulator=True)
@@ -211,7 +222,11 @@ def test_simulator_emfi_and_campaign():
         assert len(trace) == 64
 
         pytest.importorskip("pandas")
-        df = cat.campaign("emfi").configure(delay=(0, 180, 20), width=(1, 25, 3)).run(progress=False)
+        df = (
+            cat.campaign("emfi")
+            .configure(delay=(0, 180, 20), width=(1, 25, 3))
+            .run(progress=False)
+        )
         assert len(df) == 90
         ddf = fc.results_to_dataframe(df)
         # success is user-defined; the sim plants verify_status in a middle
@@ -233,7 +248,7 @@ def test_uart_set_baud_never_touches_cdc_line_coding():
             pytest.skip("uart not available")
         cat.uart.open(baud=9600)
         before = cat.uart._ser.baudrate
-        cat.uart.set_baud(1200)                 # wire baud only
+        cat.uart.set_baud(1200)  # wire baud only
         assert cat.uart._ser.baudrate == before  # CDC line-coding unchanged
         assert cat.uart._ser.baudrate != 1200
     finally:
@@ -268,8 +283,8 @@ def test_glitch_controller():
     gc.set_range("delay", range(0, 30, 10)).set_range("width", [1, 2])
     for p in gc.glitch_values():
         gc.add("success" if p["delay"] == 10 else "normal")
-    assert len(gc) == 3 * 2                       # cartesian product
-    assert gc.counts()["success"] == 2           # delay==10, both widths
+    assert len(gc) == 3 * 2  # cartesian product
+    assert gc.counts()["success"] == 2  # delay==10, both widths
     df = gc.results_df()
     assert set(["delay", "width", "group"]).issubset(df.columns)
     with pytest.raises(KeyError):
@@ -280,18 +295,29 @@ def test_glitch_map_groups_and_bool():
     pd = pytest.importorskip("pandas")
     pytest.importorskip("matplotlib")
     import matplotlib
+
     matplotlib.use("Agg")
 
     df = pd.DataFrame(
-        {"delay": [0, 1, 2, 3], "width": [0, 1, 2, 3],
-         "group": ["normal", "reset", "success", "success"]}
+        {
+            "delay": [0, 1, 2, 3],
+            "width": [0, 1, 2, 3],
+            "group": ["normal", "reset", "success", "success"],
+        }
     )
     # categorical: one legend entry per distinct group
     ax = fc.glitch_map(df, "group")
-    assert {t.get_text() for t in ax.get_legend().get_texts()} == {"normal", "reset", "success"}
+    assert {t.get_text() for t in ax.get_legend().get_texts()} == {
+        "normal",
+        "reset",
+        "success",
+    }
     # boolean mask: success vs no effect
     ax2 = fc.glitch_map(df, df.delay > 1)
-    assert {t.get_text() for t in ax2.get_legend().get_texts()} == {"success", "no effect"}
+    assert {t.get_text() for t in ax2.get_legend().get_texts()} == {
+        "success",
+        "no effect",
+    }
 
 
 def test_results_to_dataframe():
