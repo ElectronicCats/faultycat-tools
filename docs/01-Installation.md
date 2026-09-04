@@ -122,8 +122,8 @@ sudo pacman -U faultycmd-x.x.x.pkg.tar.zst
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/ElectronicCats/faultycat-TUI.git
-cd faultycat-TUI
+git clone https://github.com/ElectronicCats/faultycat-tools.git
+cd faultycat-tools
 ```
 
 2. Create and activate a virtual environment (recommended):
