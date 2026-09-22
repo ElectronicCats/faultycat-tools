@@ -3,19 +3,17 @@
 Pure stdlib, no serial port involved — works equally well on a live
 :class:`~faultycmd.protocols.scanner.LaCapture` or on a previously
 saved hexdump, so it's split out of ``scanner.py``. Input is the same
-sample layout the firmware emits: one byte per sample, bit0=SDA
-bit1=SCL (1=high, 0=low), no per-sample timestamp — sample ``i``
-occurred at ``i * interval_us``. VCD export is protocol-agnostic and
-lives in :mod:`la_decode`; this module just decodes the SDA/SCL pair.
+sample layout the firmware emits: one byte per sample, bit N = GP N
+(1=high, 0=low), no per-sample timestamp — sample ``i`` occurred at
+``i * interval_us``. VCD export is protocol-agnostic and lives in
+:mod:`la_decode`; this module just decodes an SDA/SCL pair selected by
+bit index.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Literal
-
-_SDA_MASK = 0x01
-_SCL_MASK = 0x02
 
 I2cEventKind = Literal["START", "STOP", "BYTE", "ACK", "NACK"]
 
@@ -45,8 +43,14 @@ def _debounce(bits: list[int]) -> list[int]:
     return out
 
 
-def decode_i2c(samples: bytes, interval_us: float) -> list[I2cEvent]:
+def decode_i2c(
+    samples: bytes, interval_us: float, sda_bit: int = 0, scl_bit: int = 1
+) -> list[I2cEvent]:
     """Decode a raw SDA/SCL trace into I2C bus events.
+
+    ``sda_bit``/``scl_bit`` select which sample bit carries each line —
+    the capture records GP0..GP7 as bit0..bit7, so wire SDA onto any
+    channel and pass its number here (defaults: SDA=GP0, SCL=GP1).
 
     State machine driven by edges:
       - SDA falls while SCL is high -> START
@@ -63,12 +67,18 @@ def decode_i2c(samples: bytes, interval_us: float) -> list[I2cEvent]:
     fault-injection hardware) reads as a real edge and the state
     machine otherwise reports phantom back-to-back START/STOP pairs.
     """
+    if sda_bit == scl_bit:
+        raise ValueError("sda_bit and scl_bit must be different channels")
+    if not (0 <= sda_bit <= 7 and 0 <= scl_bit <= 7):
+        raise ValueError("sda_bit/scl_bit must be in range GP0..GP7 (0-7)")
     events: list[I2cEvent] = []
     if not samples:
         return events
 
-    sda_bits = _debounce([s & _SDA_MASK for s in samples])
-    scl_bits = _debounce([(s & _SCL_MASK) >> 1 for s in samples])
+    sda_mask = 1 << sda_bit
+    scl_mask = 1 << scl_bit
+    sda_bits = _debounce([(s & sda_mask) >> sda_bit for s in samples])
+    scl_bits = _debounce([(s & scl_mask) >> scl_bit for s in samples])
 
     in_frame = False
     bit_count = 0
