@@ -1292,15 +1292,16 @@ def la(ctx: click.Context, port: str | None) -> None:
     "low, then back it up with pre-trigger history so a decoder has idle "
     "line to sync on (firmware `trig=<ch>`, see "
     "LA_CAPTURE_TRIGGER_IMPLEMENTATION_PLAN.md). Defaults to on for "
-    "--decode uart (the motivating case) and off otherwise, so a plain "
-    "GPIO/raw capture keeps today's immediate-start behavior.",
+    "--decode uart/i2c (decoders need idle-line context) and off "
+    "otherwise, so a plain GPIO/raw capture keeps today's immediate-start "
+    "behavior.",
 )
 @click.option(
     "--trigger-ch",
     type=int,
     default=None,
-    help="Trigger channel. Defaults to --rx under --decode uart; required "
-    "for --trigger with --decode none/i2c.",
+    help="Trigger channel. Defaults to --rx under --decode uart and to "
+    "--sda under --decode i2c (START is SDA falling).",
 )
 @click.option(
     "--trigger-timeout-s",
@@ -1342,13 +1343,19 @@ def la_capture(
             )
 
     if trigger is None:
-        trigger = decode == "uart"
+        # Decoders need idle-line context before the first real edge, so
+        # both in-band decodes default the trigger on; a plain GPIO/raw
+        # capture keeps today's immediate-start behavior.
+        trigger = decode in ("uart", "i2c")
 
     resolved_trigger_ch: int | None = None
     if trigger:
-        # --rx is the motivating case's natural default (--decode uart);
-        # --trigger-ch overrides it for --decode none/i2c/custom wiring.
-        resolved_trigger_ch = trigger_ch if trigger_ch is not None else rx
+        # Default to the decoded signal whose falling edge starts the
+        # frame: UART RX (start bit) or I2C SDA (START condition).
+        # --trigger-ch overrides it for custom wiring.
+        resolved_trigger_ch = (
+            trigger_ch if trigger_ch is not None else (rx if decode == "uart" else sda)
+        )
 
     trigger_timeout_ms: int | None = None
     la_call_timeout_s = timeout_s
@@ -1382,7 +1389,9 @@ def la_capture(
             "--interval-us, pass --binary to halve bytes-on-wire, or lower "
             "--samples."
         )
-    if decode == "uart":
+    if decode == "i2c":
+        print_info(f"Decoding I2C (sda=GP{sda}, scl=GP{scl})")
+    elif decode == "uart":
         print_info(f"Decoding UART @ {baud} baud (rx=GP{rx})")
 
     if vcd_path is not None:
@@ -1390,7 +1399,7 @@ def la_capture(
         print_success(f"VCD written -> {vcd_path}")
 
     if decode == "i2c":
-        events = decode_i2c(cap.samples, cap.interval_us)
+        events = decode_i2c(cap.samples, cap.interval_us, sda_bit=sda, scl_bit=scl)
         table = Table(title=f"I2C events ({len(events)})", box=box.ROUNDED)
         table.add_column("t_us", justify="right")
         table.add_column("kind", style=STYLES["device"])
