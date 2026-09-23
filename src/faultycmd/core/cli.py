@@ -1354,9 +1354,7 @@ def la_capture(
         # frame: UART RX (start bit) or I2C SDA (START condition).
         # --trigger-ch overrides it for custom wiring.
         resolved_trigger_ch = (
-            trigger_ch
-            if trigger_ch is not None
-            else (rx if decode == "uart" else sda)
+            trigger_ch if trigger_ch is not None else (rx if decode == "uart" else sda)
         )
 
     trigger_timeout_ms: int | None = None
