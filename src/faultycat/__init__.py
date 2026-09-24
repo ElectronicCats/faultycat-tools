@@ -33,6 +33,7 @@ from ._compat import (
     EngineError,
     ProtocolError,
 )
+from .cnc import CncStage, cnc_diagnostics, cnc_panel
 from .control import GlitchController
 from .engines import CampaignRunner, CrowbarEngine, EmfiEngine
 from .plotting import (
@@ -72,6 +73,9 @@ __all__ = [
     "SwdScanResult",
     "I2cScanResult",
     "UartTarget",
+    "CncStage",
+    "cnc_panel",
+    "cnc_diagnostics",
     "EmfiTrigger",
     "EmfiState",
     "CrowbarTrigger",
