@@ -125,6 +125,42 @@ def glitch_map(
     return ax
 
 
+def glitch_map_3d(
+    df: pd.DataFrame,
+    group: Any,
+    *,
+    x: str = "x",
+    y: str = "y",
+    z: str = "z",
+    ax=None,
+    title: str = "Glitch map (3D)",
+):
+    """3D scatter of every attempt at (x, y, z), coloured by the outcome YOU
+    assigned. Use it when the sweep spans a **volume** (an X/Y/Z axis set).
+    Same colour convention as :func:`glitch_map` (success=green, reset=red,
+    normal=grey; others cycle). Needs the ``[notebook]`` extra (matplotlib).
+    """
+    import matplotlib.pyplot as plt  # noqa: PLC0415 — optional [notebook] dep
+
+    g = df[group] if isinstance(group, str) else group
+    if g.dtype == bool:
+        g = g.map({True: "success", False: "no effect"})
+    if ax is None:
+        _fig = plt.figure(figsize=(7, 6))
+        ax = _fig.add_subplot(111, projection="3d")
+    cyc = iter(_CYCLE)
+    for val in sorted(g.unique(), key=lambda v: _RANK.get(v, 1)):
+        sub = df[g == val]
+        color = _GROUP_COLORS.get(val, next(cyc))
+        ax.scatter(sub[x], sub[y], sub[z], s=20, c=color, label=str(val), depthshade=False)
+    ax.set_xlabel(x)
+    ax.set_ylabel(y)
+    ax.set_zlabel(z)
+    ax.set_title(title)
+    ax.legend(loc="upper right", frameon=False)
+    return ax
+
+
 def logic_channels(capture: Any):
     """Unpack a faultycmd ``LaCapture`` into an 8xN uint8 array.
 
@@ -151,12 +187,10 @@ def plot_logic(
     interval = getattr(capture, "interval_us", 1)
     chans = list(channels) if channels is not None else list(range(8))
     t = np.arange(bits.shape[1]) * interval
-    fig, axes = plt.subplots(
-        len(chans), 1, sharex=True, figsize=(9, 0.6 * len(chans) + 1)
-    )
+    fig, axes = plt.subplots(len(chans), 1, sharex=True, figsize=(9, 0.6 * len(chans) + 1))
     if len(chans) == 1:
         axes = [axes]
-    for ax, c in zip(axes, chans):
+    for ax, c in zip(axes, chans, strict=False):
         ax.step(t, bits[c], where="post", linewidth=0.9)
         ax.set_ylim(-0.2, 1.2)
         ax.set_yticks([])

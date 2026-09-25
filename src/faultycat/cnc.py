@@ -29,7 +29,14 @@ import time
 
 import serial
 
-__all__ = ["CncStage", "cnc_panel", "cnc_diagnostics"]
+__all__ = [
+    "CncStage",
+    "cnc_panel",
+    "cnc_volume_panel",
+    "cnc_move_to",
+    "cnc_frame",
+    "cnc_diagnostics",
+]
 
 # Jog step sizes (mm) offered by the panel.
 STEPS = [0.1, 1.0, 10.0, 50.0, 100.0]
@@ -50,10 +57,39 @@ class CncStage:
         self.baud = baud
         self.timeout = timeout
         self.ser: serial.Serial | None = None
+        # Remember the adapter's VID:PID so we can re-find it if it re-enumerates
+        # to a different /dev/ttyUSB* (EMFI/HV noise resets USB-serial adapters).
+        self._vidpid = self._vidpid_of(port)
         self._open()
 
     # -- connection -------------------------------------------------------
+    @staticmethod
+    def _vidpid_of(device: str):
+        from serial.tools import list_ports  # noqa: PLC0415
+
+        for p in list_ports.comports():
+            if p.device == device and p.vid is not None:
+                return (p.vid, p.pid)
+        return None
+
+    def _resolve_port(self) -> str:
+        """Return a usable device node: the known one if it still exists,
+        otherwise a port matching the original VID:PID (the adapter may have
+        re-enumerated to a new node after an EMFI-induced USB reset)."""
+        import os  # noqa: PLC0415
+
+        if os.path.exists(self.port):
+            return self.port
+        if self._vidpid:
+            from serial.tools import list_ports  # noqa: PLC0415
+
+            for p in list_ports.comports():
+                if p.vid is not None and (p.vid, p.pid) == self._vidpid:
+                    return p.device
+        return self.port
+
     def _open(self) -> None:
+        self.port = self._resolve_port()
         self.ser = serial.Serial(self.port, self.baud, timeout=0.1)
         # Many boards reset when the port opens: wait and flush the banner.
         time.sleep(2.0)
@@ -65,8 +101,10 @@ class CncStage:
         # MIN_POS=0. Toggle it back on with soft_endstops(True).
         self._send_once("M211 S0", timeout=10)
 
-    def reconnect(self, log=None) -> None:
-        """Close (if possible) and reopen the port from scratch."""
+    def reconnect(self, log=None, attempts: int = 8, wait: float = 1.0) -> None:
+        """Close (if possible) and reopen the port, re-discovering its device
+        node and retrying — an EMFI discharge can reset the USB-serial adapter,
+        drop the port mid-command and bring it back as a different node."""
         if log:
             log("... reconnecting to port")
         try:
@@ -74,9 +112,17 @@ class CncStage:
                 self.ser.close()
         except Exception:
             pass
-        self._open()
-        if log:
-            log("... reconnected")
+        last = None
+        for _ in range(attempts):
+            try:
+                self._open()
+                if log:
+                    log(f"... reconnected on {self.port}")
+                return
+            except (OSError, serial.SerialException) as e:
+                last = e
+                time.sleep(wait)
+        raise last if last is not None else serial.SerialException("reconnect failed")
 
     def _alive(self) -> bool:
         # Usable = open and with pyserial's abort-pipe intact. If that pipe is
@@ -305,12 +351,7 @@ def cnc_panel(stage: CncStage):
             widgets.HBox(
                 [
                     jog_button("X -", "X", -1, style="primary"),
-                    action_button(
-                        "home",
-                        lambda: (stage.home(log=log), refresh_position()),
-                        style="warning",
-                        width="60px",
-                    ),
+                    blank,  # empty centre of the crosshair (use "Go to origin" below)
                     jog_button("X +", "X", +1, style="primary"),
                 ]
             ),
@@ -328,15 +369,6 @@ def cnc_panel(stage: CncStage):
 
     actions = widgets.HBox(
         [
-            action_button(
-                "Home X", lambda: (stage.home("X", log=log), refresh_position()), style="warning"
-            ),
-            action_button(
-                "Home Y", lambda: (stage.home("Y", log=log), refresh_position()), style="warning"
-            ),
-            action_button(
-                "Home Z", lambda: (stage.home("Z", log=log), refresh_position()), style="warning"
-            ),
             action_button("Position", refresh_position),
             action_button("Motors off", lambda: stage.motors_off(log=log), width="110px"),
             action_button(
@@ -395,6 +427,224 @@ def cnc_panel(stage: CncStage):
     # board can never block the panel from rendering.
     display(panel)
     refresh_position()
+
+
+def cnc_move_to(stage, params, *, feed=3000, keys=("x", "y", "z"), log=None):
+    """Move the stage to the X/Y/Z found in a campaign point ``params``.
+
+    Bridges a :class:`~faultycat.control.GlitchController` sweep to the stage:
+    add ``x``/``y``/``z`` as axes of the controller and call this per point to
+    add the CNC as an *attack axis* of the campaign::
+
+        gc = fc.GlitchController(["x", "y", "z"])
+        gc.set_range("x", range(-2, 3)).set_range("y", range(-2, 3)).set_range("z", [0])
+        for p in gc.glitch_values():
+            fc.cnc_move_to(stage, p)
+            # (fault injection + measurement go here later)
+            gc.add("visited")
+
+    Coordinates are absolute in the work frame, so set the origin over the chip
+    first (:meth:`CncStage.set_origin`). Axes missing from ``params`` are left
+    unchanged. ``keys`` maps the X/Y/Z axes to the point's keys. Blocks until
+    the move finishes (``M400``) so the probe is settled before the next step.
+    """
+    parts = [
+        f"{axis}{float(params[key]):.3f}"
+        for axis, key in zip("XYZ", keys, strict=False)
+        if key in params
+    ]
+    if not parts:
+        return
+    stage.send("G90", log=log)  # absolute, in the work frame
+    stage.send("G1 " + " ".join(parts) + f" F{feed:.0f}", log=log)
+    stage.send("M400", log=log)  # wait until the move completes
+
+
+def _span(v):
+    """(lo, hi) from a scalar, a (lo, hi) pair, or any iterable (its min/max)."""
+    if isinstance(v, (int, float)):
+        return (float(v), float(v))
+    vals = [float(x) for x in v]
+    return (min(vals), max(vals))
+
+
+def cnc_frame(
+    stage, *, x, y, z=0.0, feed=1200, pause=0.5, cycles=1, return_to_origin=True, log=None
+):
+    """Trace the corners of the work area/volume so you can confirm the travel
+    is what you want *before* running a campaign.
+
+    Moves corner to corner around the X/Y rectangle (and, if ``z`` spans a
+    range, the upper plane too, outlining the work volume), pausing at each
+    corner. ``x``/``y``/``z`` each accept a scalar, a ``(lo, hi)`` pair, or any
+    iterable — its min/max is used, so you can pass the very ranges you gave
+    ``set_range`` to preview the sweep's real extent::
+
+        fc.cnc_frame(stage, x=[0, 1, 2], y=[0, 5, 10])   # frame that area
+
+    Absolute moves in the work frame, so set the origin first
+    (:meth:`CncStage.set_origin`). By default it **returns to the origin**
+    ``(0, 0, 0)`` at the end so the probe is back where it belongs.
+
+    ``feed`` is kept moderate on purpose: too fast and a stepper can *lose
+    steps* on the corner direction-changes (open-loop, no encoder), which is
+    what makes it not come back to the same spot — lower it (or the machine's
+    acceleration, ``M204``) if you see drift.
+    """
+    x0, x1 = _span(x)
+    y0, y1 = _span(y)
+    z0, z1 = _span(z)
+
+    def rect(zz):
+        return [(x0, y0, zz), (x1, y0, zz), (x1, y1, zz), (x0, y1, zz), (x0, y0, zz)]
+
+    corners = rect(z0)
+    if z1 != z0:
+        corners += rect(z1)  # outline the upper plane too (volume check)
+
+    if log:
+        log(f"framing X[{x0:g}..{x1:g}] Y[{y0:g}..{y1:g}] Z[{z0:g}..{z1:g}]")
+    stage.send("G90", log=log)  # absolute, in the work frame
+    for _ in range(max(1, int(cycles))):
+        for cx, cy, cz in corners:
+            stage.send(f"G1 X{cx:.3f} Y{cy:.3f} Z{cz:.3f} F{feed:.0f}", log=log)
+            stage.send("M400", log=log)  # wait for the move to finish
+            if pause:
+                time.sleep(pause)
+    if return_to_origin:
+        stage.send(f"G1 X0 Y0 Z0 F{feed:.0f}", log=log)  # back to where it belongs
+        stage.send("M400", log=log)
+
+
+def cnc_volume_panel(stage):
+    """Standalone interface to define, frame and export the work **volume**.
+
+    Separate from :func:`cnc_panel` (the jog interface): jog + set the origin
+    over the chip there first, then here capture the corners (or type bounds)
+    in X/Y/Z, hit **Frame volume** to trace the box — it returns to the origin
+    so it ends where it belongs — and copy the shown `XS`/`YS`/`ZS` ranges into
+    the campaign. Requires the ``[notebook]`` extra (``ipywidgets``).
+    """
+    import ipywidgets as widgets  # noqa: PLC0415 — optional [notebook] dep
+    from IPython.display import display  # noqa: PLC0415
+
+    out = widgets.Textarea(value="", layout=widgets.Layout(width="100%", height="120px"))
+
+    def log(msg):
+        lines = [str(msg)] + out.value.split("\n")
+        out.value = "\n".join(lines[:200])
+
+    _ft = dict(layout=widgets.Layout(width="150px"))
+    xmin = widgets.FloatText(value=0.0, description="X min", **_ft)
+    xmax = widgets.FloatText(value=10.0, description="X max", **_ft)
+    ymin = widgets.FloatText(value=0.0, description="Y min", **_ft)
+    ymax = widgets.FloatText(value=10.0, description="Y max", **_ft)
+    zmin = widgets.FloatText(value=0.0, description="Z min", **_ft)
+    zmax = widgets.FloatText(value=0.0, description="Z max", **_ft)
+    area_step = widgets.FloatText(value=1.0, description="Step", **_ft)
+    feed = widgets.IntSlider(
+        value=1200,
+        min=100,
+        max=4000,
+        step=100,
+        description="Feed",
+        continuous_update=False,
+        layout=widgets.Layout(width="320px"),
+    )
+    range_out = widgets.Textarea(value="", layout=widgets.Layout(width="100%", height="80px"))
+
+    def _range_line():
+        s = area_step.value or 1.0
+
+        def axis(name, lo, hi):
+            n = max(1, int(round((hi - lo) / s)) + 1)
+            return f"{name} = [round({lo} + i*{s}, 3) for i in range({n})]   # {lo}..{hi} step {s}"
+
+        return "\n".join(
+            [
+                axis("XS", xmin.value, xmax.value),
+                axis("YS", ymin.value, ymax.value),
+                axis("ZS", zmin.value, zmax.value),
+            ]
+        )
+
+    def _update(_=None):
+        range_out.value = _range_line()
+
+    for _w in (xmin, xmax, ymin, ymax, zmin, zmax, area_step):
+        _w.observe(_update, names="value")
+    _update()
+
+    def _guard(fn):
+        def wrapped(_=None):
+            try:
+                fn()
+            except Exception as e:  # noqa: BLE001
+                log(f"! error: {e}")
+
+        return wrapped
+
+    def button(text, fn, style="", width="150px"):
+        b = widgets.Button(
+            description=text,
+            button_style=style,
+            layout=widgets.Layout(width=width, height="40px"),
+        )
+        b.on_click(_guard(fn))
+        return b
+
+    def corner(which):
+        p = stage.position(log=log)
+        if not p:
+            return
+        if which == "min":
+            xmin.value, ymin.value, zmin.value = p["X"], p["Y"], p["Z"]
+        else:
+            xmax.value, ymax.value, zmax.value = p["X"], p["Y"], p["Z"]
+        _update()
+
+    def frame():
+        cnc_frame(
+            stage,
+            x=[xmin.value, xmax.value],
+            y=[ymin.value, ymax.value],
+            z=[zmin.value, zmax.value],
+            feed=feed.value,
+            pause=0.4,
+            return_to_origin=True,
+            log=log,
+        )
+
+    panel = widgets.VBox(
+        [
+            widgets.HTML(
+                "<b>Work volume</b> — set the origin over the chip first (jog panel). "
+                "Capture corners or type bounds (X/Y/Z), <b>Frame volume</b> to verify, "
+                "then copy the ranges into the campaign. Leave Z min = Z max for a single "
+                "plane."
+            ),
+            widgets.HBox([xmin, xmax, ymin, ymax]),
+            widgets.HBox([zmin, zmax, area_step]),
+            feed,
+            widgets.HBox(
+                [
+                    button("Corner here → min", lambda: corner("min")),
+                    button("Corner here → max", lambda: corner("max")),
+                    button("Frame volume", frame, style="info", width="140px"),
+                    button(
+                        "Go to origin",
+                        lambda: stage.goto_origin(feed.value, log=log),
+                        width="130px",
+                    ),
+                ]
+            ),
+            widgets.HTML("<b>Copy into the campaign (XS / YS / ZS):</b>"),
+            range_out,
+            widgets.HTML("<b>Log:</b>"),
+            out,
+        ]
+    )
+    display(panel)
 
 
 def cnc_diagnostics(port: str, baud: int = 115200) -> None:

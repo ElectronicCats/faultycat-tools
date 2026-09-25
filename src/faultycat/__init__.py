@@ -33,11 +33,19 @@ from ._compat import (
     EngineError,
     ProtocolError,
 )
-from .cnc import CncStage, cnc_diagnostics, cnc_panel
+from .cnc import (
+    CncStage,
+    cnc_diagnostics,
+    cnc_frame,
+    cnc_move_to,
+    cnc_panel,
+    cnc_volume_panel,
+)
 from .control import GlitchController
 from .engines import CampaignRunner, CrowbarEngine, EmfiEngine
 from .plotting import (
     glitch_map,
+    glitch_map_3d,
     glitch_map_plotly,
     logic_channels,
     plot_logic,
@@ -51,11 +59,7 @@ from .uart import UartTarget
 
 def _read_version() -> str:
     try:
-        return (
-            (Path(__file__).resolve().parent.parent.parent / "VERSION")
-            .read_text()
-            .strip()
-        )
+        return (Path(__file__).resolve().parent.parent.parent / "VERSION").read_text().strip()
     except OSError:
         return "0.0.0"
 
@@ -75,6 +79,9 @@ __all__ = [
     "UartTarget",
     "CncStage",
     "cnc_panel",
+    "cnc_volume_panel",
+    "cnc_move_to",
+    "cnc_frame",
     "cnc_diagnostics",
     "EmfiTrigger",
     "EmfiState",
@@ -84,6 +91,7 @@ __all__ = [
     "ProtocolError",
     "plot_trace",
     "glitch_map",
+    "glitch_map_3d",
     "glitch_map_plotly",
     "logic_channels",
     "plot_logic",
