@@ -43,6 +43,7 @@ class FaultyCat:
         _clients: list | None = None,
         allow_version_mismatch: bool = False,
         serial_factory=None,
+        connect_cfg: dict | None = None,
     ) -> None:
         self.emfi = emfi
         self.crowbar = crowbar
@@ -51,6 +52,9 @@ class FaultyCat:
         self._open_clients = _clients or []
         self._allow_version_mismatch = allow_version_mismatch
         self._serial_factory = serial_factory
+        # The kwargs connect() was called with, so reconnect() can replay
+        # the exact same discovery after the board re-enumerates.
+        self._connect_cfg = connect_cfg or {}
 
     # -- campaigns ----------------------------------------------------
 
@@ -69,9 +73,7 @@ class FaultyCat:
             )
         else:
             check = not self._allow_version_mismatch
-            client = CampaignClient.discover(
-                engine=engine, check_firmware_version=check
-            )
+            client = CampaignClient.discover(engine=engine, check_firmware_version=check)
         client.open()
         self._open_clients.append(client)
         return CampaignRunner(client)
@@ -88,9 +90,7 @@ class FaultyCat:
         nRST (a plain GPIO pulse; no SWD needed).
         """
         if self.scanner is None:
-            raise RuntimeError(
-                "target_reset needs the scanner CDC (connect with scanner=True)"
-            )
+            raise RuntimeError("target_reset needs the scanner CDC (connect with scanner=True)")
         line = self.scanner.client.send_line(
             f"reset {int(gp)} {int(ms)}", accept_prefixes=("RESET:", "SHELL:")
         )
@@ -100,6 +100,57 @@ class FaultyCat:
                 "'reset' verb (rebuild + reflash faultycat-firmware)"
             )
         return line
+
+    # -- resilience ---------------------------------------------------
+
+    def reconnect(self, *, attempts: int = 8, wait: float = 1.0) -> FaultyCat:
+        """Re-discover and reopen every CDC by VID:PID after the board
+        re-enumerated, then re-adopt the fresh handles in place.
+
+        An EMFI shot's EMI can drop FaultyCat off USB and bring it back
+        on *new* device nodes (e.g. EMFI Control ``ttyACM0`` -> ``ttyACM1``),
+        leaving the handles this session holds dead — calls then error or
+        hang and the campaign stalls with the board idle. Call this on
+        failure to reopen on the new nodes and carry on. Engine settings
+        (trigger/delay/width/repeat) and an open ``cat.uart`` are restored.
+
+        Retries ``attempts`` times, ``wait`` seconds apart, to ride out
+        the enumeration gap. Raises ``ConnectionError`` if it never
+        comes back. A no-op for a simulator session.
+        """
+        import time  # noqa: PLC0415
+
+        if self._serial_factory is not None:
+            return self  # simulator: nothing to physically re-enumerate
+
+        emfi_snap = _snapshot_engine(self.emfi)
+        crowbar_snap = _snapshot_engine(self.crowbar)
+        uart_was_open = self.uart is not None and self.uart._ser is not None
+        uart_baud = self.uart._baud if self.uart is not None else 115200
+
+        self.close()  # drop the dead handles before re-discovering
+
+        last: Exception | None = None
+        for _ in range(attempts):
+            try:
+                fresh = connect(**{**self._connect_cfg, "require": True})
+            except Exception as exc:  # noqa: BLE001 — retry through the gap
+                last = exc
+                time.sleep(wait)
+                continue
+            self.emfi, self.crowbar = fresh.emfi, fresh.crowbar
+            self.scanner, self.uart = fresh.scanner, fresh.uart
+            self._open_clients = fresh._open_clients
+            self._serial_factory = fresh._serial_factory
+            _restore_engine(self.emfi, emfi_snap)
+            _restore_engine(self.crowbar, crowbar_snap)
+            if uart_was_open and self.uart is not None:
+                try:
+                    self.uart.open(baud=uart_baud)
+                except Exception:  # noqa: BLE001 — bridge re-opens best-effort
+                    pass
+            return self
+        raise ConnectionError(f"FaultyCat did not re-enumerate after {attempts} attempts: {last}")
 
     # -- lifecycle ----------------------------------------------------
 
@@ -126,18 +177,14 @@ class FaultyCat:
 
     def __repr__(self) -> str:
         present = [
-            n
-            for n in ("emfi", "crowbar", "scanner", "uart")
-            if getattr(self, n) is not None
+            n for n in ("emfi", "crowbar", "scanner", "uart") if getattr(self, n) is not None
         ]
         return f"FaultyCat(connected={present or 'none'})"
 
     def _repr_html_(self) -> str:
         rows = []
         for name in ("emfi", "crowbar", "scanner", "uart"):
-            rows.append(
-                (name, "✓ ready" if getattr(self, name) is not None else "— absent")
-            )
+            rows.append((name, "✓ ready" if getattr(self, name) is not None else "— absent"))
         from ._html import rows_to_html
 
         return rows_to_html("FaultyCat session", rows)
@@ -194,9 +241,7 @@ def connect(
     errors: dict[str, Exception] = {}
 
     emfi = _open(EmfiClient, emfi_port, check, opened, errors, "emfi", serial_factory)
-    crowbar = _open(
-        CrowbarClient, crowbar_port, check, opened, errors, "crowbar", serial_factory
-    )
+    crowbar = _open(CrowbarClient, crowbar_port, check, opened, errors, "crowbar", serial_factory)
 
     scan_client = None
     if scanner:
@@ -211,9 +256,7 @@ def connect(
         )
 
     if require and not opened:
-        detail = (
-            "; ".join(f"{k}: {v}" for k, v in errors.items()) or "no FaultyCat found"
-        )
+        detail = "; ".join(f"{k}: {v}" for k, v in errors.items()) or "no FaultyCat found"
         raise ConnectionError(f"could not open any FaultyCat CDC ({detail})")
 
     # The target UART reuses the scanner client for its control shell and
@@ -232,7 +275,33 @@ def connect(
         _clients=opened,
         allow_version_mismatch=allow_version_mismatch,
         serial_factory=serial_factory,
+        connect_cfg={
+            "emfi_port": emfi_port,
+            "crowbar_port": crowbar_port,
+            "scanner_port": scanner_port,
+            "target_port": target_port,
+            "scanner": scanner,
+            "uart": uart,
+            "simulator": simulator,
+            "serial_factory": serial_factory,
+            "allow_version_mismatch": allow_version_mismatch,
+        },
     )
+
+
+def _snapshot_engine(engine) -> dict | None:
+    """Capture an engine's user-set attributes (everything but its client
+    ``_c``) so they survive a reconnect that swaps in a fresh client."""
+    if engine is None:
+        return None
+    return {k: v for k, v in engine.__dict__.items() if k != "_c"}
+
+
+def _restore_engine(engine, snap: dict | None) -> None:
+    if engine is None or not snap:
+        return
+    for k, v in snap.items():
+        setattr(engine, k, v)
 
 
 def _open(client_cls, port, check, opened, errors, name, serial_factory=None):
