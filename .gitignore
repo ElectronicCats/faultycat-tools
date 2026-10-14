@@ -23,6 +23,10 @@ env/
 .coverage
 htmlcov/
 
+# Campaign checkpoints / run artifacts (GlitchController checkpoint=)
+runs/
+lab/notebooks/runs/
+
 # Packaging artifacts (built by .github/workflows/build-*.yml)
 *.deb
 *.pkg
